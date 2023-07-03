@@ -1,0 +1,12 @@
+#+title: Readme
+
+* Allergic to SSH keys???
+Try download the ~gh~ commandline tool.
+
+You should /hopefully/ be able to do
+
+#+begin_src bash
+gh auth
+#+end_src
+
+and let you log in.  (Sorry if it doesn't work. )
