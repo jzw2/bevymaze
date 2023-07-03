@@ -1,7 +1,7 @@
 #+title: Readme
 
 * Allergic to SSH keys???
-Try download the ~gh~ commandline tool.
+Try downloading the ~gh~ commandline tool.
 
 You should /hopefully/ be able to do
 
