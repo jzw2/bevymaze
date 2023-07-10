@@ -1,7 +1,9 @@
 //! A simple 3D scene with light shining over a cube sitting on a plane.
 
+mod maze_gen;
+
+use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::prelude::*;
-use bevy::input::mouse::{MouseWheel,MouseMotion};
 use bevy::render::camera::Projection;
 use bevy::window::PrimaryWindow;
 
@@ -72,7 +74,11 @@ fn pan_orbit_camera(
             let window = get_primary_window_size(&windows);
             let delta_x = {
                 let delta = rotation_move.x / window.x * std::f32::consts::PI * 2.0;
-                if pan_orbit.upside_down { -delta } else { delta }
+                if pan_orbit.upside_down {
+                    -delta
+                } else {
+                    delta
+                }
             };
             let delta_y = rotation_move.y / window.y * std::f32::consts::PI;
             let yaw = Quat::from_rotation_y(-delta_x);
@@ -104,7 +110,8 @@ fn pan_orbit_camera(
             // parent = x and y rotation
             // child = z-offset
             let rot_matrix = Mat3::from_quat(transform.rotation);
-            transform.translation = pan_orbit.focus + rot_matrix.mul_vec3(Vec3::new(0.0, 0.0, pan_orbit.radius));
+            transform.translation =
+                pan_orbit.focus + rot_matrix.mul_vec3(Vec3::new(0.0, 0.0, pan_orbit.radius));
         }
     }
 
@@ -126,8 +133,7 @@ fn spawn_camera(mut commands: Commands) {
 
     commands.spawn((
         Camera3dBundle {
-            transform: Transform::from_translation(translation)
-                .looking_at(Vec3::ZERO, Vec3::Y),
+            transform: Transform::from_translation(translation).looking_at(Vec3::ZERO, Vec3::Y),
             ..Default::default()
         },
         PanOrbitCamera {
@@ -145,17 +151,31 @@ fn setup(
 ) {
     // plane
     commands.spawn(PbrBundle {
-        mesh: meshes.add(shape::Plane::from_size(5.0).into()),
+        mesh: meshes.add(shape::Plane::from_size(10.0).into()),
         material: materials.add(Color::rgb(0.3, 0.5, 0.3).into()),
         ..default()
     });
-    // cube
+    let edited_cube = Mesh::from(shape::Box {
+        min_x: -5.0,
+        min_y: -0.5,
+        min_z: -5.0,
+        max_x: 0.0,
+        max_y: 1.0,
+        max_z: 5.0,
+    });
     commands.spawn(PbrBundle {
-        mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
+        mesh: meshes.add(edited_cube),
         material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
         transform: Transform::from_xyz(0.0, 0.5, 0.0),
         ..default()
     });
+    // cube
+    // commands.spawn(PbrBundle {
+    //     mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
+    //     material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
+    //     transform: Transform::from_xyz(0.0, 0.5, 0.0),
+    //     ..default()
+    // });
     // light
     commands.spawn(PointLightBundle {
         point_light: PointLight {
@@ -178,6 +198,5 @@ fn main() {
         .run();
 
     // just to catch compilation errors
-    let _ = App::new()
-        .add_startup_system(spawn_camera);
+    let _ = App::new().add_startup_system(spawn_camera);
 }
