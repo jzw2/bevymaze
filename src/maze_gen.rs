@@ -122,6 +122,8 @@ fn starting_nodes(graph: SquareMaze) {
     let bottom = SquareMaze::load((graph.offset.0, graph.offset.1 + graph.size));
 }
 
+
+
 /// Generate a maze graph
 /// The procedure is to connect connect and combine the components until we are left with a single
 /// one. This single one will be the maze itself.
@@ -131,50 +133,51 @@ fn populate_maze(
 ) -> SquareMaze {
     // generate a list of possible edges
     let mut possible_edges: Vec<(SquareNode, SquareNode)> = Vec::new();
-    for component in starting_components {
+    for component in &starting_components {
         // get the component
         for node in component.nodes() {
             // get all edges of node that aren't between the component and itself
             possible_edges.extend(graph.adjacent(node).into_iter().filter_map(|n| {
                 match component.contains_node(n) {
-                    true => Some((node, n)),
+                    true => Some((node.clone(), n)),
                     false => None,
                 }
             }));
         }
     }
-    while possible_edges.len() > 0 {
-        let new_edge = possible_edges.pop().unwrap();
+    while let Some(new_edge) = possible_edges.pop() {
         // add the edge
-        let mut source_comp = starting_components
-            .into_iter()
-            .find(|c| c.contains_node(new_edge.0))
-            .unwrap();
-        source_comp.add_edge(new_edge.0, new_edge.1, true);
-        // now merge the two components
         let sink_comp = starting_components
-            .into_iter()
-            .position(|c| c.contains_node(new_edge.0));
-        if sink_comp.is_some() {
-            let p = sink_comp.unwrap();
-            // merge the components, ignoring edgeless nodes
-            for edge in starting_components[p].all_edges() {
-                source_comp.add_edge(edge.0, edge.1, *edge.2);
-            }
-            // now remove the sink component
+            .iter()
+            .position(|c| c.contains_node(new_edge.0)).clone();
+
+        // now merge the two components
+        if let Some(p) = sink_comp {
+            let edges : Vec<_> = starting_components[p].all_edges().map(|(x, y, b)| (x, y, *b)).collect() ;
             starting_components.remove(p);
+            let mut source_comp = starting_components
+                .iter_mut()
+                .find(|c| c.contains_node(new_edge.0))
+                .unwrap();
+            source_comp.add_edge(new_edge.0, new_edge.1, true);
+            // merge the components, ignoring edgeless nodes
+            for edge in edges {
+                source_comp.add_edge(edge.0, edge.1, edge.2);
+            }
+
+            // now remove the sink component
+            possible_edges
+                .retain(|e| !(source_comp.contains_node(e.0) && source_comp.contains_node(e.1)));
+            // now add our new edges
+            possible_edges.extend(graph.adjacent(new_edge.1).into_iter().filter_map(|n| {
+                match source_comp.contains_node(n) {
+                    true => Some((new_edge.1, n)),
+                    false => None,
+                }
+            }));
         }
         // finally update the possible edges
         // remove any possible edges that are no longer valid
-        possible_edges
-            .retain(|e| !(source_comp.contains_node(e.0) && source_comp.contains_node(e.1)));
-        // now add our new edges
-        possible_edges.extend(graph.adjacent(new_edge.1).into_iter().filter_map(|n| {
-            match source_comp.contains_node(n) {
-                true => Some((new_edge.1, n)),
-                false => None,
-            }
-        }));
     }
     graph.maze = starting_components.pop().unwrap();
     return graph;
