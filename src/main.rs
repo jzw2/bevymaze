@@ -6,6 +6,10 @@ use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::prelude::*;
 use bevy::render::camera::Projection;
 use bevy::window::PrimaryWindow;
+use image::io::Reader as ImageReader;
+use std::io::Cursor;
+use image::{ImageBuffer, RgbImage};
+use crate::maze_gen::{populate_maze, SquareMaze, SquareMazeComponent};
 
 /// Tags an entity as capable of panning and orbiting.
 #[derive(Component)]
@@ -191,12 +195,67 @@ fn setup(
 }
 
 fn main() {
-    App::new()
-        .add_plugins(DefaultPlugins)
-        .add_startup_system(setup)
-        .add_system(pan_orbit_camera)
-        .run();
+    let node_count: u32 = 64;
+    let mut starting_comp = SquareMazeComponent::new();
+    starting_comp.add_node((0,0));
+    let mut graph: SquareMaze = SquareMaze {
+        maze: SquareMazeComponent::new(),
+        size: node_count as i64,
+        offset: (0, 0)
+    };
+    populate_maze(&mut graph, vec![starting_comp]);
 
-    // just to catch compilation errors
-    let _ = App::new().add_startup_system(spawn_camera);
+    print!("{}\n", graph.maze.node_count().to_string());
+    print!("{}", graph.maze.edge_count().to_string());
+
+    let mut img: RgbImage = ImageBuffer::new(node_count * 2, node_count * 2);
+
+    for x in 0..node_count as i64 {
+        for y in 0..node_count as i64 {
+            let chan_center = ((x * 2) as u32, (y * 2) as u32);
+            img.put_pixel(chan_center.0, chan_center.1, image::Rgb([255, 255, 255]));
+            if graph.maze.contains_edge((x, y), (x+1, y)) {
+                img.put_pixel(chan_center.0 + 1, chan_center.1, image::Rgb([255, 255, 255]));
+            }
+            if graph.maze.contains_edge((x, y), (x, y+1)) {
+                img.put_pixel(chan_center.0, chan_center.1 + 1, image::Rgb([255, 255, 255]));
+            }
+        }
+    }
+
+    img.save("maze_out.png").unwrap();
+    // // Construct a new by repeated calls to the supplied closure.
+    // let mut img = ImageBuffer::from_fn(512, 512, |x, y| {
+    //     if x % 2 == 0 {
+    //         image::Luma([0u8])
+    //     } else {
+    //         image::Luma([255u8])
+    //     }
+    // });
+
+    // // Obtain the image's width and height.
+    // let (width, height) = img.dimensions();
+    //
+    // // Access the pixel at coordinate (100, 100).
+    // let pixel = img[(100, 100)];
+    //
+    // // Or use the `get_pixel` method from the `GenericImage` trait.
+    // let pixel = *img.get_pixel(100, 100);
+    //
+    // // Put a pixel at coordinate (100, 100).
+    // img.put_pixel(100, 100, pixel);
+    //
+    // // Iterate over all pixels in the image.
+    // for pixel in img.pixels() {
+    //     // Do something with pixel.
+    // }
+
+    // App::new()
+    //     .add_plugins(DefaultPlugins)
+    //     .add_startup_system(setup)
+    //     .add_system(pan_orbit_camera)
+    //     .run();
+    //
+    // // just to catch compilation errors
+    // let _ = App::new().add_startup_system(spawn_camera);
 }

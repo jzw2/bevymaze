@@ -1,20 +1,83 @@
+use bevy::utils::HashSet;
 use petgraph::prelude::{GraphMap, UnGraphMap};
 use petgraph::visit::{GetAdjacencyMatrix, IntoEdgeReferences, IntoEdges};
+use rand::seq::SliceRandom;
+use rand::{thread_rng, Rng};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
+
+/// utility functions
+/// copied from https://stackoverflow.com/a/53773240/3210986
+struct VecSet<T> {
+    set: HashSet<T>,
+    vec: Vec<T>,
+}
+
+impl<T> VecSet<T>
+where
+    T: Clone + Eq + std::hash::Hash,
+{
+    fn new() -> Self {
+        Self {
+            set: HashSet::new(),
+            vec: Vec::new(),
+        }
+    }
+    fn insert(&mut self, elem: T) {
+        assert_eq!(self.set.len(), self.vec.len());
+        let was_new = self.set.insert(elem.clone());
+        if was_new {
+            self.vec.push(elem);
+        }
+    }
+    fn remove_random(&mut self) -> T {
+        assert_eq!(self.set.len(), self.vec.len());
+        let index = thread_rng().gen_range(0..self.vec.len());
+        let elem = self.vec.swap_remove(index);
+        let was_present = self.set.remove(&elem);
+        assert!(was_present);
+        elem
+    }
+    fn is_empty(&self) -> bool {
+        assert_eq!(self.set.len(), self.vec.len());
+        self.vec.is_empty()
+    }
+
+    /// end stackoverflow section
+
+    pub fn retain<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&T) -> bool,
+    {
+        self.retain_mut(|elem| f(elem));
+    }
+
+    pub fn retain_mut<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&mut T) -> bool,
+    {
+        self.vec.retain_mut(|el| {
+            if f(el) {
+                return true;
+            }
+            self.set.remove(el);
+            false
+        });
+    }
+}
 
 const MAZE_CHUNK_SIZE: u16 = 32;
 
 /// a node representing the x/y coordinates of the maze intersection
-type SquareNode = (i64, i64);
+pub type SquareNode = (i64, i64);
 /// a component, possibly a complete one
-type SquareMazeComponent = UnGraphMap<SquareNode, bool>;
+pub type SquareMazeComponent = UnGraphMap<SquareNode, bool>;
 
 /// Represent a square grid maze
-struct SquareMaze {
-    maze: SquareMazeComponent,
-    size: i64,
-    offset: (i64, i64),
+pub struct SquareMaze {
+    pub(crate) maze: SquareMazeComponent,
+    pub(crate) size: i64,
+    pub(crate) offset: (i64, i64),
 }
 
 /// Divide the "n"umerator from the "d"enominator and round up
@@ -50,7 +113,7 @@ impl SquareMaze {
         if center.1 - 1 >= self.offset.1 {
             nodes.push((center.0, center.1 - 1))
         }
-
+        nodes.shuffle(&mut thread_rng());
         return nodes;
     }
 
@@ -122,66 +185,80 @@ fn starting_nodes(graph: SquareMaze) {
     let bottom = SquareMaze::load((graph.offset.0, graph.offset.1 + graph.size));
 }
 
-fn add_possible_edges_of_components(
+fn add_possible_edges_of_component(
     graph: &SquareMaze,
-    possible_edges: &mut Vec<((i64, i64), (i64, i64))>,
+    possible_edges: &mut VecSet<((i64, i64), (i64, i64))>,
     component: &SquareMazeComponent,
 ) {
     for node in component.nodes() {
         // get all edges of node that aren't between the component and itself
-        possible_edges.extend(graph.adjacent(node).into_iter().filter_map(|n| {
-            match component.contains_node(n) {
-                true => Some((node.clone(), n)),
-                false => None,
-            }
-        }));
+        for node in
+            graph
+                .adjacent(node)
+                .into_iter()
+                .filter_map(|n| match component.contains_node(n) {
+                    false => Some((node.clone(), n)),
+                    true => None,
+                })
+        {
+            possible_edges.insert(node);
+        }
     }
 }
 
 /// Generate a maze graph
 /// The procedure is to connect connect and combine the components until we are left with a single
 /// one. This single one will be the maze itself.
-fn populate_maze(
-    mut graph: SquareMaze,
+pub fn populate_maze(
+    graph: &mut SquareMaze,
     mut starting_components: Vec<SquareMazeComponent>,
-) -> SquareMaze {
+) -> &SquareMaze {
     // generate a list of possible edges
-    let mut possible_edges: Vec<(SquareNode, SquareNode)> = Vec::new();
+    let mut possible_edges: VecSet<(SquareNode, SquareNode)> = VecSet::new();
     for component in &starting_components {
-        add_possible_edges_of_components(&graph, &mut possible_edges, component);
+        add_possible_edges_of_component(&graph, &mut possible_edges, component);
     }
-    while let Some(new_edge) = possible_edges.pop() {
-        // add the edge
+    // let last_sink: SquareNode;
+    while !possible_edges.is_empty() {
+        let new_edge = possible_edges.remove_random();
         let source_comp_index = starting_components
             .iter_mut()
             .position(|c| c.contains_node(new_edge.0))
             .unwrap();
-        starting_components[source_comp_index].add_edge(new_edge.0, new_edge.1, true);
-        // now merge the two components
-        if let Some(p) = starting_components
+        // first merge the two components (if the sink component exists)
+        if let Some(sink_comp_index) = starting_components
             .iter()
-            .position(|c| c.contains_node(new_edge.0))
+            .position(|c| c.contains_node(new_edge.1))
             .clone()
         {
-            let edges: Vec<_> = starting_components[p]
+            let edges: Vec<_> = starting_components[sink_comp_index]
                 .all_edges()
                 .map(|(x, y, b)| (x, y, *b))
                 .collect();
-            // now remove the sink component
-            starting_components.remove(p);
-            let source_comp = &mut starting_components[source_comp_index];
             // merge the components, ignoring edgeless nodes
             for edge in edges {
-                source_comp.add_edge(edge.0, edge.1, edge.2);
+                starting_components[source_comp_index].add_edge(edge.0, edge.1, edge.2);
             }
-
-            // finally update the possible edges
-            // remove any possible edges that are no longer valid
-            possible_edges
-                .retain(|e| !(source_comp.contains_node(e.0) && source_comp.contains_node(e.1)));
-            // now add our new edges
-            add_possible_edges_of_components(&graph, &mut possible_edges, source_comp);
+            // now remove the sink component
+            starting_components.remove(sink_comp_index);
         }
+        // now we add the edge and check for new edges
+        let source_comp_index = starting_components
+            .iter_mut()
+            .position(|c| c.contains_node(new_edge.0))
+            .unwrap();
+        let source_comp = &mut starting_components[source_comp_index];
+
+        // we add the edge
+        source_comp.add_edge(new_edge.0, new_edge.1, true);
+
+        // finally update the possible edges
+        // remove any possible edges that are no longer valid
+        possible_edges
+            .retain(|e| !(source_comp.contains_node(e.0) && source_comp.contains_node(e.1)));
+        // now search for new possible edges
+        // we only have to look at the component we modified
+        add_possible_edges_of_component(&graph, &mut possible_edges, source_comp);
     }
     graph.maze = starting_components.pop().unwrap();
     return graph;
