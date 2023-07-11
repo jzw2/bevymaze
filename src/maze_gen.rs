@@ -144,15 +144,13 @@ fn populate_maze(
         }
     }
     while let Some(new_edge) = possible_edges.pop() {
-        {
             // add the edge
-            let mut source_comp = starting_components
+            let mut source_comp_index = starting_components
                 .iter_mut()
-                .find(|c| c.contains_node(new_edge.0))
+                .position(|c| c.contains_node(new_edge.0))
                 .unwrap();
 
-            source_comp.add_edge(new_edge.0, new_edge.1, true);
-        }
+            starting_components[source_comp_index].add_edge(new_edge.0, new_edge.1, true);
         // now merge the two components
         if let Some(p) = starting_components
             .iter()
@@ -165,10 +163,7 @@ fn populate_maze(
                 .collect();
             // now remove the sink component
             starting_components.remove(p);
-            let mut source_comp = starting_components
-                .iter_mut()
-                .find(|c| c.contains_node(new_edge.0))
-                .unwrap();
+            let mut source_comp = &mut starting_components[source_comp_index];
             // merge the components, ignoring edgeless nodes
             for edge in edges {
                 source_comp.add_edge(edge.0, edge.1, edge.2);
