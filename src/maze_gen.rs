@@ -122,6 +122,22 @@ fn starting_nodes(graph: SquareMaze) {
     let bottom = SquareMaze::load((graph.offset.0, graph.offset.1 + graph.size));
 }
 
+fn add_possible_edges_of_components(
+    graph: &SquareMaze,
+    possible_edges: &mut Vec<((i64, i64), (i64, i64))>,
+    component: &SquareMazeComponent,
+) {
+    for node in component.nodes() {
+        // get all edges of node that aren't between the component and itself
+        possible_edges.extend(graph.adjacent(node).into_iter().filter_map(|n| {
+            match component.contains_node(n) {
+                true => Some((node.clone(), n)),
+                false => None,
+            }
+        }));
+    }
+}
+
 /// Generate a maze graph
 /// The procedure is to connect connect and combine the components until we are left with a single
 /// one. This single one will be the maze itself.
@@ -132,16 +148,7 @@ fn populate_maze(
     // generate a list of possible edges
     let mut possible_edges: Vec<(SquareNode, SquareNode)> = Vec::new();
     for component in &starting_components {
-        // get the component
-        for node in component.nodes() {
-            // get all edges of node that aren't between the component and itself
-            possible_edges.extend(graph.adjacent(node).into_iter().filter_map(|n| {
-                match component.contains_node(n) {
-                    true => Some((node.clone(), n)),
-                    false => None,
-                }
-            }));
-        }
+        add_possible_edges_of_components(&graph, &mut possible_edges, component);
     }
     while let Some(new_edge) = possible_edges.pop() {
         {
@@ -150,7 +157,6 @@ fn populate_maze(
                 .iter_mut()
                 .find(|c| c.contains_node(new_edge.0))
                 .unwrap();
-
             source_comp.add_edge(new_edge.0, new_edge.1, true);
         }
         // now merge the two components
@@ -179,12 +185,7 @@ fn populate_maze(
             possible_edges
                 .retain(|e| !(source_comp.contains_node(e.0) && source_comp.contains_node(e.1)));
             // now add our new edges
-            possible_edges.extend(graph.adjacent(new_edge.1).into_iter().filter_map(|n| {
-                match source_comp.contains_node(n) {
-                    true => Some((new_edge.1, n)),
-                    false => None,
-                }
-            }));
+            add_possible_edges_of_components(&graph, &mut possible_edges, source_comp);
         }
     }
     graph.maze = starting_components.pop().unwrap();
