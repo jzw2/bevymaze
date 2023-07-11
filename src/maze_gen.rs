@@ -122,8 +122,6 @@ fn starting_nodes(graph: SquareMaze) {
     let bottom = SquareMaze::load((graph.offset.0, graph.offset.1 + graph.size));
 }
 
-
-
 /// Generate a maze graph
 /// The procedure is to connect connect and combine the components until we are left with a single
 /// one. This single one will be the maze itself.
@@ -146,26 +144,38 @@ fn populate_maze(
         }
     }
     while let Some(new_edge) = possible_edges.pop() {
-        // add the edge
-        let sink_comp = starting_components
-            .iter()
-            .position(|c| c.contains_node(new_edge.0)).clone();
+        {
+            // add the edge
+            let mut source_comp = starting_components
+                .iter_mut()
+                .find(|c| c.contains_node(new_edge.0))
+                .unwrap();
 
+            source_comp.add_edge(new_edge.0, new_edge.1, true);
+        }
         // now merge the two components
-        if let Some(p) = sink_comp {
-            let edges : Vec<_> = starting_components[p].all_edges().map(|(x, y, b)| (x, y, *b)).collect() ;
+        if let Some(p) = starting_components
+            .iter()
+            .position(|c| c.contains_node(new_edge.0))
+            .clone()
+        {
+            let edges: Vec<_> = starting_components[p]
+                .all_edges()
+                .map(|(x, y, b)| (x, y, *b))
+                .collect();
+            // now remove the sink component
             starting_components.remove(p);
             let mut source_comp = starting_components
                 .iter_mut()
                 .find(|c| c.contains_node(new_edge.0))
                 .unwrap();
-            source_comp.add_edge(new_edge.0, new_edge.1, true);
             // merge the components, ignoring edgeless nodes
             for edge in edges {
                 source_comp.add_edge(edge.0, edge.1, edge.2);
             }
 
-            // now remove the sink component
+            // finally update the possible edges
+            // remove any possible edges that are no longer valid
             possible_edges
                 .retain(|e| !(source_comp.contains_node(e.0) && source_comp.contains_node(e.1)));
             // now add our new edges
@@ -176,8 +186,6 @@ fn populate_maze(
                 }
             }));
         }
-        // finally update the possible edges
-        // remove any possible edges that are no longer valid
     }
     graph.maze = starting_components.pop().unwrap();
     return graph;
