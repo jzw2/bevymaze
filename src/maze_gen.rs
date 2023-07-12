@@ -152,7 +152,6 @@ impl SquareMaze {
         if center.1 - 1 >= self.offset.1 {
             nodes.push((center.0, center.1 - 1))
         }
-        nodes.shuffle(&mut thread_rng());
         return nodes;
     }
 
