@@ -9,114 +9,70 @@ use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::ptr::null;
 
-/// utility object for storing possible edges
-/// edges are stored as
-
-trait GetRandomNode<N, E> {
-    fn pop_random_edge(&mut self, neighbor_of: Option<N>) -> Option<(N, N)>;
-    // TODO: re-add these to the trait once we properly generify the maze generation code
-    // fn add_possible_edges_of_component(&mut self, maze: SquareMaze, component: SquareMazeComponent);
-    // fn clean_edges_of_component(&mut self, component: SquareMazeComponent);
-}
-
-impl<N, E> GetRandomNode<N, E> for UnGraphMap<N, E>
-where
-    N: NodeTrait,
-{
-    fn pop_random_edge(&mut self, neighbor_of: Option<N>) -> Option<(N, N)> {
-        if self.edge_count() == 0 {
-            return None;
-        }
-        let rng = &mut thread_rng();
-        let mut source = neighbor_of;
-        let mut edge: Option<(N, N)> = None;
-        if source.is_none() {
-            // choose a source!
-            source = self.nodes().choose(rng);
-        } else {
-            let neighbors = self.neighbors(source.unwrap());
-            let neighbor = neighbors.choose(rng);
-            if neighbor.is_none() {
-                // we just have to redefine source
-                source = self.nodes().choose(rng);
-            } else {
-                // we have all we need to set the edge immediately
-                edge = Some((source.unwrap(), neighbor.unwrap()));
-            }
-        }
-
-        // we haven't set edge so our source must be chosen by now
-        if edge.is_none() {
-            let src = source.unwrap();
-            edge = Some((src, self.neighbors(src).choose(rng).unwrap()));
-        }
-
-        if let Some(e) = edge {
-            self.remove_edge(e.0, e.1);
-            if self.neighbors(e.0).count() == 0 {
-                self.remove_node(e.0);
-            }
-            if self.neighbors(e.1).count() == 0 {
-                self.remove_node(e.1);
-            }
-
-            return edge;
-        }
-
-        panic!("Could not choose an edge!");
-    }
-}
-
-fn add_possible_edges_of_component2(
-    possible_edges: &mut UnGraphMap<SquareNode, bool>,
-    maze: &SquareMaze,
-    component: &SquareMazeComponent,
-) {
-    for node in component.nodes() {
-        // get all edges of node that aren't between the component and itself
-        for edge in
-            maze.adjacent(node)
-                .into_iter()
-                .filter_map(|n| match component.contains_node(n) {
-                    false => Some((node.clone(), n)),
-                    true => None,
-                })
-        {
-            possible_edges.add_edge(edge.0, edge.1, true);
-        }
-    }
-}
-
-fn clean_edges_of_component(
-    possible_edges: &mut UnGraphMap<SquareNode, bool>,
-    component: &SquareMazeComponent,
-) {
-    // look into making this a lil faster?
-    for edge in possible_edges.clone().all_edges() {
-        if component.contains_node(edge.0) && component.contains_node(edge.1) {
-            possible_edges.remove_edge(edge.0, edge.1);
-            if possible_edges.neighbors(edge.0).count() == 0 {
-                possible_edges.remove_node(edge.0);
-            }
-            if possible_edges.neighbors(edge.1).count() == 0 {
-                possible_edges.remove_node(edge.1);
-            }
-        }
-    }
-}
-
-const MAZE_CHUNK_SIZE: u16 = 32;
 
 /// a node representing the x/y coordinates of the maze intersection
 pub type SquareNode = (i64, i64);
+/// a node representing the "r/theta" coordinates of the maze
+/// not really r/theta, but "radius" and "sector"
+pub type CircleNode = (u64, i64);
 /// a component, possibly a complete one
-pub type SquareMazeComponent = UnGraphMap<SquareNode, bool>;
+pub type MazeComponent<N> = UnGraphMap<N, bool>;
+pub type SquareMazeComponent = MazeComponent<SquareNode>;
+pub type CircleMazeComponent = MazeComponent<CircleNode>;
+
+pub trait Maze<N: NodeTrait> {
+    fn maze(&mut self) -> &mut MazeComponent<N>;
+    fn set_maze(&mut self, maze: MazeComponent<N>);
+    fn adjacent(&self, center: N) -> Vec<N>;
+}
 
 /// Represent a square grid maze
 pub struct SquareMaze {
     pub(crate) maze: SquareMazeComponent,
     pub(crate) size: i64,
     pub(crate) offset: (i64, i64),
+}
+
+impl Maze<SquareNode> for SquareMaze {
+    fn maze(&mut self) -> &mut MazeComponent<SquareNode> {
+        return &mut self.maze;
+    }
+
+    fn set_maze(&mut self, maze: MazeComponent<SquareNode>) {
+        self.maze = maze;
+    }
+
+    fn adjacent(&self, center: SquareNode) -> Vec<SquareNode> {
+        let mut nodes: Vec<SquareNode> = vec![];
+        let size_off: SquareNode = (self.offset.0 + self.size, self.offset.1 + self.size);
+        if center.0 + 1 < size_off.0 {
+            nodes.push((center.0 + 1, center.1))
+        }
+        if center.1 + 1 < size_off.1 {
+            nodes.push((center.0, center.1 + 1))
+        }
+        if center.0 - 1 >= self.offset.0 {
+            nodes.push((center.0 - 1, center.1))
+        }
+        if center.1 - 1 >= self.offset.1 {
+            nodes.push((center.0, center.1 - 1))
+        }
+        return nodes;
+    }
+}
+
+pub struct CircleMaze {
+    pub(crate) maze: CircleMazeComponent,
+    /// the center in world-space
+    pub(crate) center: (i64, i64),
+    pub(crate) radius_unit: (i64, i64),
+    /// the radius in node-units
+    pub(crate) radius: u64,
+    /// the amount of sectors in the inner-most circle
+    pub(crate) center_sectors: u64,
+    /// when going up by one radius unit, we may increase the amount of sectors
+    /// if the amount of sectors can fit
+    pub(crate) subsequent_divisions: u64,
 }
 
 /// Divide the "n"umerator from the "d"enominator and round up
@@ -137,24 +93,6 @@ fn next_i64_tuple(file: &mut File, mut buf: [u8; 8]) -> (i64, i64) {
 }
 
 impl SquareMaze {
-    fn adjacent(&self, center: (i64, i64)) -> Vec<(i64, i64)> {
-        let mut nodes: Vec<(i64, i64)> = vec![];
-        let size_off: (i64, i64) = (self.offset.0 + self.size, self.offset.1 + self.size);
-        if center.0 + 1 < size_off.0 {
-            nodes.push((center.0 + 1, center.1))
-        }
-        if center.1 + 1 < size_off.1 {
-            nodes.push((center.0, center.1 + 1))
-        }
-        if center.0 - 1 >= self.offset.0 {
-            nodes.push((center.0 - 1, center.1))
-        }
-        if center.1 - 1 >= self.offset.1 {
-            nodes.push((center.0, center.1 - 1))
-        }
-        return nodes;
-    }
-
     fn save(&self) {
         self.save_named(SquareMaze::file_name(self.offset).as_str());
     }
@@ -216,6 +154,104 @@ impl SquareMaze {
     }
 }
 
+/// This is an extension to the UnGraphMap that we use to store possible edges
+/// when we are populating the maze
+trait GetRandomNode<N: NodeTrait, E: Clone> {
+    fn pop_random_edge(&mut self, neighbor_of: Option<N>) -> Option<(N, N)>;
+    // TODO: remove the `weight` param, not sure how yet
+    fn add_possible_edges_of_component<M: Maze<N>>(
+        &mut self,
+        maze: &M,
+        component: &MazeComponent<N>,
+        weight: E,
+    );
+    fn clean_edges_of_component(&mut self, component: &MazeComponent<N>);
+}
+
+impl<N: NodeTrait, E: Clone> GetRandomNode<N, E> for UnGraphMap<N, E> {
+    fn pop_random_edge(&mut self, neighbor_of: Option<N>) -> Option<(N, N)> {
+        if self.edge_count() == 0 {
+            return None;
+        }
+        let rng = &mut thread_rng();
+        let mut source = neighbor_of;
+        let mut edge: Option<(N, N)> = None;
+        if source.is_none() {
+            // choose a source!
+            source = self.nodes().choose(rng);
+        } else {
+            let neighbors = self.neighbors(source.unwrap());
+            let neighbor = neighbors.choose(rng);
+            if neighbor.is_none() {
+                // we just have to redefine source
+                source = self.nodes().choose(rng);
+            } else {
+                // we have all we need to set the edge immediately
+                edge = Some((source.unwrap(), neighbor.unwrap()));
+            }
+        }
+
+        // we haven't set edge so our source must be chosen by now
+        if edge.is_none() {
+            let src = source.unwrap();
+            edge = Some((src, self.neighbors(src).choose(rng).unwrap()));
+        }
+
+        if let Some(e) = edge {
+            self.remove_edge(e.0, e.1);
+            if self.neighbors(e.0).count() == 0 {
+                self.remove_node(e.0);
+            }
+            if self.neighbors(e.1).count() == 0 {
+                self.remove_node(e.1);
+            }
+
+            return edge;
+        }
+
+        panic!("Could not choose an edge!");
+    }
+
+    fn clean_edges_of_component(&mut self, component: &MazeComponent<N>) {
+        // look into making this a lil faster?
+        for edge in self.clone().all_edges() {
+            if component.contains_node(edge.0) && component.contains_node(edge.1) {
+                self.remove_edge(edge.0, edge.1);
+                if self.neighbors(edge.0).count() == 0 {
+                    self.remove_node(edge.0);
+                }
+                if self.neighbors(edge.1).count() == 0 {
+                    self.remove_node(edge.1);
+                }
+            }
+        }
+    }
+
+    // TODO: see about removing weight because it's kinda dumb
+    fn add_possible_edges_of_component<M: Maze<N>>(
+        &mut self,
+        maze: &M,
+        component: &MazeComponent<N>,
+        weight: E,
+    ) {
+        for node in component.nodes() {
+            // get all edges of node that aren't between the component and itself
+            for edge in
+                maze.adjacent(node)
+                    .into_iter()
+                    .filter_map(|n| match component.contains_node(n) {
+                        false => Some((node.clone(), n)),
+                        true => None,
+                    })
+            {
+                self.add_edge(edge.0, edge.1, weight.clone());
+            }
+        }
+    }
+}
+
+const MAZE_CHUNK_SIZE: u16 = 32;
+
 fn starting_nodes(graph: SquareMaze) {
     let left = SquareMaze::load((graph.offset.0 - graph.size, graph.offset.1));
     let right = SquareMaze::load((graph.offset.0 + graph.size, graph.offset.1));
@@ -226,16 +262,19 @@ fn starting_nodes(graph: SquareMaze) {
 /// Generate a maze graph
 /// The procedure is to connect connect and combine the components until we are left with a single
 /// one. This single one will be the maze itself.
-pub fn populate_maze(
-    graph: &mut SquareMaze,
-    mut starting_components: Vec<SquareMazeComponent>,
-) -> &SquareMaze {
+pub fn populate_maze<N: NodeTrait, M: Maze<N>>(
+    graph: &mut M,
+    mut starting_components: Vec<MazeComponent<N>>,
+) -> &M
+where
+    M: Maze<N>,
+{
     // generate a list of possible edges
-    let mut possible_edges: UnGraphMap<SquareNode, bool> = UnGraphMap::new();
+    let mut possible_edges: UnGraphMap<N, bool> = UnGraphMap::new();
     for component in &starting_components {
-        add_possible_edges_of_component2(&mut possible_edges, &graph, component);
+        possible_edges.add_possible_edges_of_component(graph, component, true);
     }
-    let mut last_sink: Option<SquareNode> = None;
+    let mut last_sink: Option<N> = None;
     while let Some(mut new_edge) = possible_edges.pop_random_edge(last_sink) {
         // find the source and sink comps
         // the source comp needs to be a real component
@@ -276,14 +315,14 @@ pub fn populate_maze(
 
         // finally update the possible edges
         // remove any possible edges that are no longer valid
-        clean_edges_of_component(&mut possible_edges, source_comp);
+        possible_edges.clean_edges_of_component(source_comp);
         // now search for new possible edges
         // we only have to look at the component we modified
-        add_possible_edges_of_component2(&mut possible_edges, &graph, source_comp);
+        possible_edges.add_possible_edges_of_component(graph, source_comp, true);
 
         // finally finally set the last sink so we can continue on and create a meandering path
         last_sink = Some(new_edge.1);
     }
-    graph.maze = starting_components.pop().unwrap();
+    graph.set_maze(starting_components.pop().unwrap());
     return graph;
 }

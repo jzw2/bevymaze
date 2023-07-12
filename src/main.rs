@@ -9,7 +9,7 @@ use bevy::window::PrimaryWindow;
 use image::io::Reader as ImageReader;
 use std::io::Cursor;
 use image::{ImageBuffer, RgbImage};
-use crate::maze_gen::{populate_maze, SquareMaze, SquareMazeComponent};
+use crate::maze_gen::{populate_maze, SquareMaze, SquareMazeComponent, SquareNode};
 
 /// Tags an entity as capable of panning and orbiting.
 #[derive(Component)]
