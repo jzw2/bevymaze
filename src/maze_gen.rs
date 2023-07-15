@@ -119,8 +119,7 @@ impl CircleMaze {
     /// Get the next node along the current ring
     /// modulo
     fn next_node(&self, node: CircleNode, increment: i64, nodes_at_radius: u64) -> CircleNode {
-        let nar = (nodes_at_radius as i64);
-        return (node.0, (node.1 + increment).rem_euclid(nar));
+        return (node.0, (node.1 + increment).rem_euclid(nodes_at_radius as i64));
     }
 }
 
@@ -174,7 +173,7 @@ impl Maze<CircleNode> for CircleMaze {
         let our_angle = self.angle_of_node(center, our_count);
         let our_next_angle = self.angle_of_node(our_next, our_count);
         // full equation is
-        // `ceil( (2*pi*(r+1)*s / (N + k)) / (2*pi*r/N) ) + 1`
+        // `ceil( (2*pi*(r+1)*s / (N + k)) / (2*pi*r/N) )`
         // but simplified
         // the rationale is that we want to know how many of the outer cells
         // will fit into the smaller ones
@@ -242,7 +241,7 @@ impl Maze<CircleNode> for CircleMaze {
             );
 
             // full equation is
-            // `ceil( (2*pi*(r-1)*s / (N^)) / (2*pi*r/N) ) + 1`
+            // `ceil( (2*pi*(r-1)*s / (N^)) / (2*pi*r/N) )`
             // but simplified
             // the rationale is that we want to know how many of the outer cells
             // will fit into the smaller ones
