@@ -119,7 +119,10 @@ impl CircleMaze {
     /// Get the next node along the current ring
     /// modulo
     fn next_node(&self, node: CircleNode, increment: i64, nodes_at_radius: u64) -> CircleNode {
-        return (node.0, (node.1 + increment).rem_euclid(nodes_at_radius as i64));
+        return (
+            node.0,
+            (node.1 + increment).rem_euclid(nodes_at_radius as i64),
+        );
     }
 }
 
@@ -172,54 +175,57 @@ impl Maze<CircleNode> for CircleMaze {
         let path_angle = self.path_angle(center.0);
         let our_angle = self.angle_of_node(center, our_count);
         let our_next_angle = self.angle_of_node(our_next, our_count);
-        // full equation is
-        // `ceil( (2*pi*(r+1)*s / (N + k)) / (2*pi*r/N) )`
-        // but simplified
-        // the rationale is that we want to know how many of the outer cells
-        // will fit into the smaller ones
-        let nodes_to_check_above = ((our_count as f64) * (center.0 as f64 + 1.0)
-            / (above_count as f64 * center.0 as f64))
-            .ceil() as i64;
 
-        // get all the nodes above us
-        for i in 0..nodes_to_check_above {
-            // the node we are currently checking
-            let above_to_check = self.next_node(closest_above, i, above_count);
+        if center.0 <= self.radius {
+            // full equation is
+            // `ceil( (2*pi*(r+1)*s / (N + k)) / (2*pi*r/N) )`
+            // but simplified
+            // the rationale is that we want to know how many of the outer cells
+            // will fit into the smaller ones
+            let nodes_to_check_above = ((our_count as f64) * (center.0 as f64 + 1.0)
+                / (above_count as f64 * center.0 as f64))
+                .ceil() as i64;
+            // get all the nodes above us
+            for i in 0..nodes_to_check_above {
+                // the node we are currently checking
+                let above_to_check = self.next_node(closest_above, i, above_count);
 
-            let above_angle = self.angle_of_node(above_to_check, above_count);
+                let above_angle = self.angle_of_node(above_to_check, above_count);
 
-            if i == 0 {
-                // when i = 0, we need to use `n` as the distance measure, not `n+1`
-                if above_angle < our_angle {
-                    // if `theta_n < theta_n'` then we check the angle
-                    // from `n'` to `n`
-                    // eq is `theta_n' - theta_n > P_theta`
-                    if above_angle - our_angle >= above_path_angle {
-                        // this means we can fit a connection in BEFORE `n'`
-                        nodes.push(self.next_node(above_to_check, -1, above_count));
-                    }
-                } else if above_angle > our_angle {
-                    // if `theta_n > theta_n'` then we check the distance/angle
-                    // from `n` to `n'+1` to see if we can fit a node
-                    // equation is `theta_(n'+1) - theta_n > P_theta`
-                    // where P_theta is the min path width, will be `s` here
-                    if self
-                        .angle_of_node(self.next_node(above_to_check, 1, above_count), above_count)
-                        - our_angle
-                        >= above_path_angle
-                    {
-                        // this means we can fit a connection in AFTER `n`
-                        nodes.push(above_to_check);
+                if i == 0 {
+                    // when i = 0, we need to use `n` as the distance measure, not `n+1`
+                    if above_angle < our_angle {
+                        // if `theta_n < theta_n'` then we check the angle
+                        // from `n'` to `n`
+                        // eq is `theta_n' - theta_n > P_theta`
+                        if above_angle - our_angle >= above_path_angle {
+                            // this means we can fit a connection in BEFORE `n'`
+                            nodes.push(self.next_node(above_to_check, -1, above_count));
+                        }
+                    } else if above_angle > our_angle {
+                        // if `theta_n > theta_n'` then we check the distance/angle
+                        // from `n` to `n'+1` to see if we can fit a node
+                        // equation is `theta_(n'+1) - theta_n > P_theta`
+                        // where P_theta is the min path width, will be `s` here
+                        if self.angle_of_node(
+                            self.next_node(above_to_check, 1, above_count),
+                            above_count,
+                        ) - our_angle
+                            >= above_path_angle
+                        {
+                            // this means we can fit a connection in AFTER `n`
+                            nodes.push(above_to_check);
+                        }
+                    } else {
+                        if our_next_angle - above_angle >= above_path_angle {
+                            nodes.push(above_to_check);
+                        }
                     }
                 } else {
+                    // otherwise we simply check the distance to `theta_(n+1)`
                     if our_next_angle - above_angle >= above_path_angle {
                         nodes.push(above_to_check);
                     }
-                }
-            } else {
-                // otherwise we simply check the distance to `theta_(n+1)`
-                if our_next_angle - above_angle >= above_path_angle {
-                    nodes.push(above_to_check);
                 }
             }
         }

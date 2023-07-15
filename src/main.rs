@@ -202,36 +202,19 @@ fn main() {
         radius: 10,
         min_path_width: 0.1
     };
-    println!("===0, 0===");
-    for el in graph.adjacent((0, 0)) {
-        println!("({}, {})", el.0, el.1);
-    }
-    println!("===1, 0===");
-    for el in graph.adjacent((1, 0)) {
-        println!("({}, {})", el.0, el.1);
-    }
-    println!("===1, 2===");
-    for el in graph.adjacent((1, 2)) {
-        println!("({}, {})", el.0, el.1);
-    }
-    println!("===2, 0===");
-    for el in graph.adjacent((2, 0)) {
-        println!("({}, {})", el.0, el.1);
-    }
-    println!("===3, 10===");
-    for el in graph.adjacent((3, 10)) {
-        println!("({}, {})", el.0, el.1);
-    }
 
     // let node_count: u32 = 64;
-    // let mut starting_comp = SquareMazeComponent::new();
-    // starting_comp.add_node((0,0));
+    let mut starting_comp = CircleMazeComponent::new();
+    starting_comp.add_node((0,0));
     // let mut graph: SquareMaze = SquareMaze {
     //     maze: SquareMazeComponent::new(),
     //     size: node_count as i64,
     //     offset: (0, 0)
     // };
-    // populate_maze(&mut graph, vec![starting_comp]);
+    populate_maze(&mut graph, vec![starting_comp]);
+    for e in graph.maze.all_edges() {
+        println!("({} {}) <-> ({} {})", e.0.0, e.0.1, e.1.0, e.1.1);
+    }
     //
     // print!("{}\n", graph.maze.node_count().to_string());
     // print!("{}", graph.maze.edge_count().to_string());
