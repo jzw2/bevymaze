@@ -9,7 +9,7 @@ use bevy::window::PrimaryWindow;
 use image::io::Reader as ImageReader;
 use std::io::Cursor;
 use image::{ImageBuffer, RgbImage};
-use crate::maze_gen::{populate_maze, SquareMaze, SquareMazeComponent, SquareNode};
+use crate::maze_gen::{CircleMaze, CircleMazeComponent, Maze, populate_maze, SquareMaze, SquareMazeComponent, SquareNode};
 
 /// Tags an entity as capable of panning and orbiting.
 #[derive(Component)]
@@ -195,35 +195,63 @@ fn setup(
 }
 
 fn main() {
-    let node_count: u32 = 64;
-    let mut starting_comp = SquareMazeComponent::new();
-    starting_comp.add_node((0,0));
-    let mut graph: SquareMaze = SquareMaze {
-        maze: SquareMazeComponent::new(),
-        size: node_count as i64,
-        offset: (0, 0)
+    let mut graph = CircleMaze {
+        maze: CircleMazeComponent::new(),
+        cell_size: 1.0,
+        center: (0, 0),
+        radius: 10,
+        min_path_width: 0.1
     };
-    populate_maze(&mut graph, vec![starting_comp]);
-
-    print!("{}\n", graph.maze.node_count().to_string());
-    print!("{}", graph.maze.edge_count().to_string());
-
-    let mut img: RgbImage = ImageBuffer::new(node_count * 2, node_count * 2);
-
-    for x in 0..node_count as i64 {
-        for y in 0..node_count as i64 {
-            let chan_center = ((x * 2) as u32, (y * 2) as u32);
-            img.put_pixel(chan_center.0, chan_center.1, image::Rgb([255, 255, 255]));
-            if graph.maze.contains_edge((x, y), (x+1, y)) {
-                img.put_pixel(chan_center.0 + 1, chan_center.1, image::Rgb([255, 255, 255]));
-            }
-            if graph.maze.contains_edge((x, y), (x, y+1)) {
-                img.put_pixel(chan_center.0, chan_center.1 + 1, image::Rgb([255, 255, 255]));
-            }
-        }
+    println!("===0, 0===");
+    for el in graph.adjacent((0, 0)) {
+        println!("({}, {})", el.0, el.1);
+    }
+    println!("===1, 0===");
+    for el in graph.adjacent((1, 0)) {
+        println!("({}, {})", el.0, el.1);
+    }
+    println!("===1, 2===");
+    for el in graph.adjacent((1, 2)) {
+        println!("({}, {})", el.0, el.1);
+    }
+    println!("===2, 0===");
+    for el in graph.adjacent((2, 0)) {
+        println!("({}, {})", el.0, el.1);
+    }
+    println!("===3, 10===");
+    for el in graph.adjacent((3, 10)) {
+        println!("({}, {})", el.0, el.1);
     }
 
-    img.save("maze_out.png").unwrap();
+    // let node_count: u32 = 64;
+    // let mut starting_comp = SquareMazeComponent::new();
+    // starting_comp.add_node((0,0));
+    // let mut graph: SquareMaze = SquareMaze {
+    //     maze: SquareMazeComponent::new(),
+    //     size: node_count as i64,
+    //     offset: (0, 0)
+    // };
+    // populate_maze(&mut graph, vec![starting_comp]);
+    //
+    // print!("{}\n", graph.maze.node_count().to_string());
+    // print!("{}", graph.maze.edge_count().to_string());
+    //
+    // let mut img: RgbImage = ImageBuffer::new(node_count * 2, node_count * 2);
+    //
+    // for x in 0..node_count as i64 {
+    //     for y in 0..node_count as i64 {
+    //         let chan_center = ((x * 2) as u32, (y * 2) as u32);
+    //         img.put_pixel(chan_center.0, chan_center.1, image::Rgb([255, 255, 255]));
+    //         if graph.maze.contains_edge((x, y), (x+1, y)) {
+    //             img.put_pixel(chan_center.0 + 1, chan_center.1, image::Rgb([255, 255, 255]));
+    //         }
+    //         if graph.maze.contains_edge((x, y), (x, y+1)) {
+    //             img.put_pixel(chan_center.0, chan_center.1 + 1, image::Rgb([255, 255, 255]));
+    //         }
+    //     }
+    // }
+    //
+    // img.save("maze_out.png").unwrap();
     // // Construct a new by repeated calls to the supplied closure.
     // let mut img = ImageBuffer::from_fn(512, 512, |x, y| {
     //     if x % 2 == 0 {
