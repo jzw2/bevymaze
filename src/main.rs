@@ -211,6 +211,7 @@ fn main() {
     //     size: node_count as i64,
     //     offset: (0, 0)
     // };
+
     populate_maze(&mut graph, vec![starting_comp]);
     for e in graph.maze.all_edges() {
         println!("({} {}) <-> ({} {})", e.0.0, e.0.1, e.1.0, e.1.1);

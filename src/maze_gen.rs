@@ -118,11 +118,16 @@ impl CircleMaze {
 
     /// Get the next node along the current ring
     /// modulo
-    fn next_node(&self, node: CircleNode, increment: i64, nodes_at_radius: u64) -> CircleNode {
-        return (
-            node.0,
-            (node.1 + increment).rem_euclid(nodes_at_radius as i64),
-        );
+    fn next_node(&self, node: CircleNode, increment: i64) -> CircleNode {
+        return (node.0, node.1 + increment);
+    }
+
+    /// Map a possibly out of bounds node to it's in bounds counter-part
+    fn correct_node(&self, node: CircleNode) -> CircleNode {
+        if node.0 == 0 {
+            return (0, 0);
+        }
+        return (node.0, node.1.rem_euclid(self.nodes_at_radius(node.0) as i64));
     }
 }
 
@@ -156,8 +161,8 @@ impl Maze<CircleNode> for CircleMaze {
         // called `N`
         let our_count = self.nodes_at_radius(center.0);
 
-        let our_next = self.next_node(center, 1, our_count);
-        let our_prev = self.next_node(center, -1, our_count);
+        let our_next = self.next_node(center, 1);
+        let our_prev = self.next_node(center, -1);
         // first add the obvious connections
         nodes.push(our_next);
         nodes.push(our_prev);
@@ -188,7 +193,7 @@ impl Maze<CircleNode> for CircleMaze {
             // get all the nodes above us
             for i in 0..nodes_to_check_above {
                 // the node we are currently checking
-                let above_to_check = self.next_node(closest_above, i, above_count);
+                let above_to_check = self.next_node(closest_above, i);
 
                 let above_angle = self.angle_of_node(above_to_check, above_count);
 
@@ -200,17 +205,15 @@ impl Maze<CircleNode> for CircleMaze {
                         // eq is `theta_n' - theta_n > P_theta`
                         if above_angle - our_angle >= above_path_angle {
                             // this means we can fit a connection in BEFORE `n'`
-                            nodes.push(self.next_node(above_to_check, -1, above_count));
+                            nodes.push(self.next_node(above_to_check, -1));
                         }
                     } else if above_angle > our_angle {
                         // if `theta_n > theta_n'` then we check the distance/angle
                         // from `n` to `n'+1` to see if we can fit a node
                         // equation is `theta_(n'+1) - theta_n > P_theta`
                         // where P_theta is the min path width, will be `s` here
-                        if self.angle_of_node(
-                            self.next_node(above_to_check, 1, above_count),
-                            above_count,
-                        ) - our_angle
+                        if self.angle_of_node(self.next_node(above_to_check, 1), above_count)
+                            - our_angle
                             >= above_path_angle
                         {
                             // this means we can fit a connection in AFTER `n`
@@ -256,7 +259,7 @@ impl Maze<CircleNode> for CircleMaze {
                 .ceil() as i64;
             for i in 0..nodes_to_check_below {
                 // the node we are currently checking
-                let below_to_check = self.next_node(closest_below, i, below_count);
+                let below_to_check = self.next_node(closest_below, i);
 
                 let below_angle = self.angle_of_node(below_to_check, below_count);
 
@@ -264,14 +267,12 @@ impl Maze<CircleNode> for CircleMaze {
                     if our_angle < below_angle {
                         // we might be able to fit a connection before `theta_n^` aka `n^`
                         if below_angle - our_angle >= path_angle {
-                            nodes.push(self.next_node(below_to_check, -1, below_count));
+                            nodes.push(self.next_node(below_to_check, -1));
                         }
                     } else if our_angle > below_angle {
                         //check if we fit a connection between `n^+1` and `n`
-                        if self.angle_of_node(
-                            self.next_node(below_to_check, 1, below_count),
-                            below_count,
-                        ) - our_angle
+                        if self.angle_of_node(self.next_node(below_to_check, 1), below_count)
+                            - our_angle
                             >= path_angle
                         {
                             nodes.push(below_to_check)
@@ -289,6 +290,9 @@ impl Maze<CircleNode> for CircleMaze {
                     }
                 }
             }
+        }
+        for i in 0..nodes.len() {
+            nodes[i] = self.correct_node(nodes[i]);
         }
         return nodes;
     }
