@@ -111,9 +111,9 @@ impl CircleMaze {
     }
 
     /// Get the angle that a single path width takes up at a certain radius
-    /// actual eq is `p / (2*pi*r*s)`
+    /// actual eq is `p / (2*pi*r*s) * 2 * pi`
     fn path_angle(&self, at_radius: u64) -> f64 {
-        return self.min_path_width / (2.0 * PI * at_radius as f64 * self.cell_size);
+        return self.min_path_width / (at_radius as f64 * self.cell_size);
     }
 
     /// Get the next node along the current ring

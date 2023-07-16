@@ -209,8 +209,8 @@ fn main() {
         maze: CircleMazeComponent::new(),
         cell_size: 1.0,
         center: (0, 0),
-        radius: 3,
-        min_path_width: 0.01,
+        radius: 10,
+        min_path_width: 1.0,
     };
 
     // let node_count: u32 = 64;
@@ -225,33 +225,33 @@ fn main() {
 
 
     populate_maze(&mut graph, vec![starting_comp]);
-    println!("(3, 7) ADJ");
-    for n in graph.adjacent((3, 7)) {
-        println!("({} {}) <-> ({} {})", 3, 7, n.0, n.1);
-    }
-    println!("END (3, 7) ADJ");
-
-    println!("(2, 9) ADJ");
-    for n in graph.adjacent((2, 9)) {
-        println!("({} {}) <-> ({} {})", 2, 9, n.0, n.1);
-    }
-    println!("END (2, 9) ADJ");
-
-    println!("(2, 5) ADJ");
-    for n in graph.adjacent((2, 5)) {
-        println!("({} {}) <-> ({} {})", 2, 5, n.0, n.1);
-    }
-    println!("END (2, 5) ADJ");
-
-    println!("(3, 13) ADJ");
-    for n in graph.adjacent((3, 13)) {
-        println!("({} {}) <-> ({} {})", 3, 13, n.0, n.1);
-    }
-    println!("END (3, 13) ADJ");
-
-    for e in graph.maze.all_edges() {
-        println!("({} {}) <-> ({} {})", e.0 .0, e.0 .1, e.1 .0, e.1 .1);
-    }
+    // println!("(3, 7) ADJ");
+    // for n in graph.adjacent((3, 7)) {
+    //     println!("({} {}) <-> ({} {})", 3, 7, n.0, n.1);
+    // }
+    // println!("END (3, 7) ADJ");
+    //
+    // println!("(2, 9) ADJ");
+    // for n in graph.adjacent((2, 9)) {
+    //     println!("({} {}) <-> ({} {})", 2, 9, n.0, n.1);
+    // }
+    // println!("END (2, 9) ADJ");
+    //
+    // println!("(2, 5) ADJ");
+    // for n in graph.adjacent((2, 5)) {
+    //     println!("({} {}) <-> ({} {})", 2, 5, n.0, n.1);
+    // }
+    // println!("END (2, 5) ADJ");
+    //
+    // println!("(3, 13) ADJ");
+    // for n in graph.adjacent((3, 13)) {
+    //     println!("({} {}) <-> ({} {})", 3, 13, n.0, n.1);
+    // }
+    // println!("END (3, 13) ADJ");
+    //
+    // for e in graph.maze.all_edges() {
+    //     println!("({} {}) <-> ({} {})", e.0 .0, e.0 .1, e.1 .0, e.1 .1);
+    // }
 
     let mut img: RgbImage = ImageBuffer::from_pixel(1024, 1024, Rgb([255, 255, 255]));
 
@@ -262,7 +262,7 @@ fn main() {
 
     let transform = AxisTransform {
         offset: (img.width() as f64 / 2.0, img.height() as f64 / 2.0),
-        scale: (100.0, -100.0),
+        scale: (30.0, -30.0),
     };
     for r in 1..graph.radius + 2 {
         let circle = Circle {
@@ -318,33 +318,33 @@ fn main() {
         draw_segment(&mut img, segment, transform);
     }
 
-    for r in 1..graph.radius + 2 {
-        if r <= graph.radius {
-            let count = graph.nodes_at_radius(r);
-            println!("{} {}", r, count);
-            for n in 0..count {
-                let p = polar_to_cart((
-                    (r as f64 + 0.5) * graph.cell_size,
-                    (n as f64 + 0.5) / (graph.nodes_at_radius(r) as f64) * 2.0 * PI,
-                ));
-
-                let tx = (p.0 * transform.scale.0) + transform.offset.0;
-                let ty = (p.1 * transform.scale.1) + transform.offset.1;
-
-                draw_text_mut(
-                    &mut img,
-                    Rgb([255, 0, 0]),
-                    tx.round() as i32,
-                    ty.round() as i32,
-                    font_scale,
-                    font,
-                    &*format!("({}, {})", r, n),
-                );
-                // println!("{}, {}", tx.round() as i32,
-                //          ty.round() as i32,);
-            }
-        }
-    }
+    // for r in 1..graph.radius + 2 {
+    //     if r <= graph.radius {
+    //         let count = graph.nodes_at_radius(r);
+    //         println!("{} {}", r, count);
+    //         for n in 0..count {
+    //             let p = polar_to_cart((
+    //                 (r as f64 + 0.5) * graph.cell_size,
+    //                 (n as f64 + 0.5) / (graph.nodes_at_radius(r) as f64) * 2.0 * PI,
+    //             ));
+    //
+    //             let tx = (p.0 * transform.scale.0) + transform.offset.0;
+    //             let ty = (p.1 * transform.scale.1) + transform.offset.1;
+    //
+    //             draw_text_mut(
+    //                 &mut img,
+    //                 Rgb([255, 0, 0]),
+    //                 tx.round() as i32,
+    //                 ty.round() as i32,
+    //                 font_scale,
+    //                 font,
+    //                 &*format!("({}, {})", r, n),
+    //             );
+    //             // println!("{}, {}", tx.round() as i32,
+    //             //          ty.round() as i32,);
+    //         }
+    //     }
+    // }
 
     img.save("maze_out.png").unwrap();
 
