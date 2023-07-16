@@ -8,5 +8,7 @@ edition = "2021"
 [dependencies]
 bevy = "0.10.1"
 image = "0.24.6"
+imageproc = "0.23.0"
 petgraph = "0.6.3"
 rand = "0.8.5"
+rusttype = "0.9.3"

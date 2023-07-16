@@ -3,8 +3,9 @@ use bevy::utils::{HashMap, HashSet};
 use petgraph::graphmap::NodeTrait;
 use petgraph::prelude::{GraphMap, UnGraphMap};
 use petgraph::visit::{GetAdjacencyMatrix, IntoEdgeReferences, IntoEdges, IntoNeighbors};
+use rand::rngs::{StdRng, ThreadRng};
 use rand::seq::{IteratorRandom, SliceRandom};
-use rand::{thread_rng, Rng};
+use rand::{thread_rng, Rng, SeedableRng};
 use std::f64::consts::PI;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
@@ -99,15 +100,14 @@ impl CircleMaze {
     /// we can only have an integer number of nodes
     ///
     /// we call this `N` in most equations
-    fn nodes_at_radius(&self, radius: u64) -> u64 {
+    pub fn nodes_at_radius(&self, radius: u64) -> u64 {
         return (2.0 * PI * (radius as f64)).floor() as u64;
     }
 
     /// Get the actual angle of the node
-    /// actual eq is `n/N * 2 * pi * r * s`
+    /// actual eq is `n/N * 2 * pi`
     fn angle_of_node(&self, node: CircleNode, nodes_at_radius: u64) -> f64 {
-        return (node.1 as f64) / (nodes_at_radius as f64)
-            * (2.0 * PI * (node.0 as f64) * self.cell_size);
+        return (node.1 as f64) / (nodes_at_radius as f64) * (2.0 * PI);
     }
 
     /// Get the angle that a single path width takes up at a certain radius
@@ -127,7 +127,10 @@ impl CircleMaze {
         if node.0 == 0 {
             return (0, 0);
         }
-        return (node.0, node.1.rem_euclid(self.nodes_at_radius(node.0) as i64));
+        return (
+            node.0,
+            node.1.rem_euclid(self.nodes_at_radius(node.0) as i64),
+        );
     }
 }
 
@@ -167,14 +170,6 @@ impl Maze<CircleNode> for CircleMaze {
         nodes.push(our_next);
         nodes.push(our_prev);
 
-        // get the closest node in the ring above us
-        // in equations we call this `n'`
-        // eq is (r + 1, [theta / N * N'])
-        let closest_above: CircleNode = (
-            center.0 + 1,
-            ((center.1 as f64) / (our_count as f64) * (above_count as f64)).round() as i64,
-        );
-
         // we will need this later
         let above_path_angle = self.path_angle(center.0 + 1);
         let path_angle = self.path_angle(center.0);
@@ -182,14 +177,23 @@ impl Maze<CircleNode> for CircleMaze {
         let our_next_angle = self.angle_of_node(our_next, our_count);
 
         if center.0 <= self.radius {
+            // get the closest node in the ring above us
+            // in equations we call this `n'`
+            // eq is (r + 1, [theta / N * N'])
+            let closest_above: CircleNode = (
+                center.0 + 1,
+                ((center.1 as f64) / (our_count as f64) * (above_count as f64)).round() as i64,
+            );
+
             // full equation is
-            // `ceil( (2*pi*(r+1)*s / (N + k)) / (2*pi*r/N) )`
+            // `ceil( (2*pi*(r+1)*s / (N + k)) / (2*pi*r/N) ) + 1`
             // but simplified
             // the rationale is that we want to know how many of the outer cells
             // will fit into the smaller ones
             let nodes_to_check_above = ((our_count as f64) * (center.0 as f64 + 1.0)
                 / (above_count as f64 * center.0 as f64))
-                .ceil() as i64;
+                .ceil() as i64 + 1;
+
             // get all the nodes above us
             for i in 0..nodes_to_check_above {
                 // the node we are currently checking
@@ -198,37 +202,19 @@ impl Maze<CircleNode> for CircleMaze {
                 let above_angle = self.angle_of_node(above_to_check, above_count);
 
                 if i == 0 {
-                    // when i = 0, we need to use `n` as the distance measure, not `n+1`
-                    if above_angle < our_angle {
-                        // if `theta_n < theta_n'` then we check the angle
-                        // from `n'` to `n`
+                    if above_angle > our_angle {
+                        // if `theta_n < theta_n'` then we check the angle from `n'` to `n`
                         // eq is `theta_n' - theta_n > P_theta`
                         if above_angle - our_angle >= above_path_angle {
                             // this means we can fit a connection in BEFORE `n'`
                             nodes.push(self.next_node(above_to_check, -1));
                         }
-                    } else if above_angle > our_angle {
-                        // if `theta_n > theta_n'` then we check the distance/angle
-                        // from `n` to `n'+1` to see if we can fit a node
-                        // equation is `theta_(n'+1) - theta_n > P_theta`
-                        // where P_theta is the min path width, will be `s` here
-                        if self.angle_of_node(self.next_node(above_to_check, 1), above_count)
-                            - our_angle
-                            >= above_path_angle
-                        {
-                            // this means we can fit a connection in AFTER `n`
-                            nodes.push(above_to_check);
-                        }
-                    } else {
-                        if our_next_angle - above_angle >= above_path_angle {
-                            nodes.push(above_to_check);
-                        }
                     }
-                } else {
-                    // otherwise we simply check the distance to `theta_(n+1)`
-                    if our_next_angle - above_angle >= above_path_angle {
-                        nodes.push(above_to_check);
-                    }
+                }
+
+                // otherwise we simply check the distance to `theta_(n+1)`
+                if our_next_angle - above_angle >= above_path_angle {
+                    nodes.push(above_to_check);
                 }
             }
         }
@@ -246,17 +232,17 @@ impl Maze<CircleNode> for CircleMaze {
             // eq is (r - 1, [theta / N * N^])
             let closest_below: CircleNode = (
                 center.0 - 1,
-                ((center.1 as f64) * ((above_count as f64) / (our_count as f64))).round() as i64,
+                ((center.1 as f64) / (our_count as f64) * (below_count as f64)).round() as i64,
             );
 
             // full equation is
-            // `ceil( (2*pi*(r-1)*s / (N^)) / (2*pi*r/N) )`
+            // `ceil( (2*pi*(r-1)*s / (N^)) / (2*pi*r/N) ) + 1`
             // but simplified
             // the rationale is that we want to know how many of the outer cells
             // will fit into the smaller ones
             let nodes_to_check_below = ((our_count as f64) * (center.0 as f64 - 1.0)
                 / (below_count as f64 * center.0 as f64))
-                .ceil() as i64;
+                .ceil() as i64 + 1;
             for i in 0..nodes_to_check_below {
                 // the node we are currently checking
                 let below_to_check = self.next_node(closest_below, i);
@@ -269,33 +255,30 @@ impl Maze<CircleNode> for CircleMaze {
                         if below_angle - our_angle >= path_angle {
                             nodes.push(self.next_node(below_to_check, -1));
                         }
-                    } else if our_angle > below_angle {
-                        //check if we fit a connection between `n^+1` and `n`
-                        if self.angle_of_node(self.next_node(below_to_check, 1), below_count)
-                            - our_angle
-                            >= path_angle
-                        {
-                            nodes.push(below_to_check)
-                        }
-                    } else {
-                        //check if we fit a connection between `n^` and `n+1`
-                        if our_next_angle - below_angle >= path_angle {
-                            nodes.push(below_to_check);
-                        }
                     }
-                } else {
-                    // default case is to check if we fit a connection between `n^+i` and `n+1`
-                    if our_next_angle - below_angle >= path_angle {
-                        nodes.push(below_to_check);
-                    }
+                }
+
+                // in general check if we can fit a connection between `n^+i` and `n+1`
+                if our_next_angle - below_angle >= path_angle {
+                    nodes.push(below_to_check);
                 }
             }
         }
-        for i in 0..nodes.len() {
-            nodes[i] = self.correct_node(nodes[i]);
-        }
-        return nodes;
+        return nodes
+            .iter()
+            .filter_map(|n| {
+                return if n.0 <= self.radius {
+                    Some(self.correct_node(*n))
+                } else {
+                    None
+                };
+            })
+            .collect();
     }
+}
+
+pub fn polar_to_cart(p: (f64, f64)) -> (f64, f64) {
+    return (p.0 * p.1.cos(), p.0 * p.1.sin());
 }
 
 /// Divide the "n"umerator from the "d"enominator and round up
