@@ -262,7 +262,7 @@ fn main() {
 
     let transform = AxisTransform {
         offset: (img.width() as f64 / 2.0, img.height() as f64 / 2.0),
-        scale: (30.0, -30.0),
+        scale: (43.0, -43.0),
     };
     for r in 1..graph.radius + 2 {
         let circle = Circle {
@@ -308,11 +308,12 @@ fn main() {
         let segment = Segment {
             p1,
             p2,
-            line_width: 0.05,
+            line_width: 0.8,
             color: Rgb([
-                rng.next_u32() as u8,
-                rng.next_u32() as u8,
-                rng.next_u32() as u8,
+                // rng.next_u32() as u8,
+                // rng.next_u32() as u8,
+                // rng.next_u32() as u8,
+                255, 255, 255
             ]),
         };
         draw_segment(&mut img, segment, transform);
