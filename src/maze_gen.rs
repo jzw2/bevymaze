@@ -87,6 +87,9 @@ pub struct CircleMaze {
     ///
     /// represented as `p` in equations
     pub(crate) min_path_width: f64,
+
+    /// the wall width, used when rendering the wall
+    pub(crate) wall_width: f64
 }
 
 impl CircleMaze {
@@ -106,24 +109,24 @@ impl CircleMaze {
 
     /// Get the actual angle of the node
     /// actual eq is `n/N * 2 * pi`
-    fn angle_of_node(&self, node: CircleNode, nodes_at_radius: u64) -> f64 {
+    pub fn angle_of_node(&self, node: CircleNode, nodes_at_radius: u64) -> f64 {
         return (node.1 as f64) / (nodes_at_radius as f64) * (2.0 * PI);
     }
 
     /// Get the angle that a single path width takes up at a certain radius
     /// actual eq is `p / (2*pi*r*s) * 2 * pi`
-    fn path_angle(&self, at_radius: u64) -> f64 {
-        return self.min_path_width / (at_radius as f64 * self.cell_size);
+    pub fn path_angle(&self, at_radius: u64, min_path_width: f64) -> f64 {
+        return min_path_width / (at_radius as f64 * self.cell_size);
     }
 
     /// Get the next node along the current ring
     /// modulo
-    fn next_node(&self, node: CircleNode, increment: i64) -> CircleNode {
+    pub fn next_node(&self, node: CircleNode, increment: i64) -> CircleNode {
         return (node.0, node.1 + increment);
     }
 
     /// Map a possibly out of bounds node to it's in bounds counter-part
-    fn correct_node(&self, node: CircleNode) -> CircleNode {
+    pub fn correct_node(&self, node: CircleNode) -> CircleNode {
         if node.0 == 0 {
             return (0, 0);
         }
@@ -132,19 +135,10 @@ impl CircleMaze {
             node.1.rem_euclid(self.nodes_at_radius(node.0) as i64),
         );
     }
-}
 
-impl Maze<CircleNode> for CircleMaze {
-    fn maze(&mut self) -> &mut MazeComponent<CircleNode> {
-        return &mut self.maze;
-    }
-
-    fn set_maze(&mut self, maze: MazeComponent<CircleNode>) {
-        self.maze = maze;
-    }
-
-    /// center is (r, n)
-    fn adjacent(&self, center: CircleNode) -> Vec<CircleNode> {
+    /// Get all the nodes that share a wall of at least minimum_distance
+    /// does NOT correct for negative/OOB angles
+    pub fn touching(&self, center: CircleNode, minimum_distance: f64) -> Vec<CircleNode> {
         let mut nodes: Vec<CircleNode> = vec![];
 
         // we need to know how our node count compares to the others
@@ -171,8 +165,8 @@ impl Maze<CircleNode> for CircleMaze {
         nodes.push(our_prev);
 
         // we will need this later
-        let above_path_angle = self.path_angle(center.0 + 1);
-        let path_angle = self.path_angle(center.0);
+        let above_path_angle = self.path_angle(center.0 + 1, minimum_distance);
+        let path_angle = self.path_angle(center.0, minimum_distance);
         let our_angle = self.angle_of_node(center, our_count);
         let our_next_angle = self.angle_of_node(our_next, our_count);
 
@@ -192,7 +186,8 @@ impl Maze<CircleNode> for CircleMaze {
             // will fit into the smaller ones
             let nodes_to_check_above = ((our_count as f64) * (center.0 as f64 + 1.0)
                 / (above_count as f64 * center.0 as f64))
-                .ceil() as i64 + 1;
+                .ceil() as i64
+                + 1;
 
             // get all the nodes above us
             for i in 0..nodes_to_check_above {
@@ -242,7 +237,8 @@ impl Maze<CircleNode> for CircleMaze {
             // will fit into the smaller ones
             let nodes_to_check_below = ((our_count as f64) * (center.0 as f64 - 1.0)
                 / (below_count as f64 * center.0 as f64))
-                .ceil() as i64 + 1;
+                .ceil() as i64
+                + 1;
             for i in 0..nodes_to_check_below {
                 // the node we are currently checking
                 let below_to_check = self.next_node(closest_below, i);
@@ -264,8 +260,22 @@ impl Maze<CircleNode> for CircleMaze {
                 }
             }
         }
-        return nodes
-            .iter()
+        return nodes;
+    }
+}
+
+impl Maze<CircleNode> for CircleMaze {
+    fn maze(&mut self) -> &mut MazeComponent<CircleNode> {
+        return &mut self.maze;
+    }
+
+    fn set_maze(&mut self, maze: MazeComponent<CircleNode>) {
+        self.maze = maze;
+    }
+
+    /// center is (r, n)
+    fn adjacent(&self, center: CircleNode) -> Vec<CircleNode> {
+        return self.touching(center, self.min_path_width).iter()
             .filter_map(|n| {
                 return if n.0 <= self.radius {
                     Some(self.correct_node(*n))
@@ -275,10 +285,6 @@ impl Maze<CircleNode> for CircleMaze {
             })
             .collect();
     }
-}
-
-pub fn polar_to_cart(p: (f64, f64)) -> (f64, f64) {
-    return (p.0 * p.1.cos(), p.0 * p.1.sin());
 }
 
 /// Divide the "n"umerator from the "d"enominator and round up
@@ -379,7 +385,7 @@ impl<N: NodeTrait, E: Clone> GetRandomNode<N, E> for UnGraphMap<N, E> {
         if self.edge_count() == 0 {
             return None;
         }
-        let rng = &mut thread_rng();
+        let rng = &mut StdRng::seed_from_u64(42);
         let mut source = neighbor_of;
         let mut edge: Option<(N, N)> = None;
         if source.is_none() {

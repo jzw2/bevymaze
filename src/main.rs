@@ -1,21 +1,23 @@
 //! A simple 3D scene with light shining over a cube sitting on a plane.
 
 mod maze_gen;
+mod maze_render;
 mod test_render;
 
 use crate::maze_gen::{
-    polar_to_cart, populate_maze, CircleMaze, CircleMazeComponent, CircleNode, Maze, SquareMaze,
+    populate_maze, CircleMaze, CircleMazeComponent, CircleNode, Maze, SquareMaze,
     SquareMazeComponent, SquareNode,
 };
-use crate::test_render::{draw_circle, draw_segment, AxisTransform, Circle, Segment};
+use crate::test_render::{draw_circle, draw_segment, AxisTransform, DrawableCircle, DrawableSegment, to_canvas_space};
 // use bevy::input::mouse::{MouseMotion, MouseWheel};
 // use bevy::prelude::*;
 // use bevy::render::camera::Projection;
 // use bevy::window::PrimaryWindow;
+use crate::maze_render::{polar_to_cart, Circle, Segment, GetWall};
 use image::io::Reader as ImageReader;
 use image::{ImageBuffer, Rgb, RgbImage};
 use imageproc::drawing::{draw_text, draw_text_mut};
-use rand::{thread_rng, RngCore, Rng, SeedableRng};
+use rand::{thread_rng, Rng, RngCore, SeedableRng};
 use rusttype::{Font, Scale};
 use std::f64::consts::PI;
 use std::fmt::format;
@@ -209,8 +211,9 @@ fn main() {
         maze: CircleMazeComponent::new(),
         cell_size: 1.0,
         center: (0, 0),
-        radius: 10,
-        min_path_width: 1.0,
+        radius: 4,
+        min_path_width: 0.5,
+        wall_width: 0.05
     };
 
     // let node_count: u32 = 64;
@@ -221,8 +224,6 @@ fn main() {
     //     size: node_count as i64,
     //     offset: (0, 0)
     // };
-
-
 
     populate_maze(&mut graph, vec![starting_comp]);
     // println!("(3, 7) ADJ");
@@ -249,27 +250,62 @@ fn main() {
     // }
     // println!("END (3, 13) ADJ");
     //
-    // for e in graph.maze.all_edges() {
-    //     println!("({} {}) <-> ({} {})", e.0 .0, e.0 .1, e.1 .0, e.1 .1);
-    // }
+
+    // debug info
+    for e in graph.maze.all_edges() {
+        println!("({} {}) <-> ({} {})", e.0 .0, e.0 .1, e.1 .0, e.1 .1);
+    }
+
+    for r in 1..graph.radius + 2 {
+        if r <= graph.radius {
+            let count = graph.nodes_at_radius(r);
+            for n in 0..(count as i64) {
+                if !graph.maze.contains_edge((r, n), graph.correct_node((r, n+1))) {
+                    println!("NF ({} {}) <-> ({} {})", r, n, r, n+1);
+                }
+                for touching in graph.touching((r, n), 0.0) {
+                    println!("({} {}) touches ({} {})", r, n, touching.0, touching.1);
+                }
+                println!("End touching");
+            }
+        }
+    }
 
     let mut img: RgbImage = ImageBuffer::from_pixel(1024, 1024, Rgb([255, 255, 255]));
 
-    let font_data: &[u8] =
-        include_bytes!("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf");
+    let font_data: &[u8] = include_bytes!("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf");
     let font: &Font = &Font::try_from_bytes(font_data).unwrap();
     let font_scale = Scale { x: 20.0, y: 20.0 };
 
     let transform = AxisTransform {
         offset: (img.width() as f64 / 2.0, img.height() as f64 / 2.0),
-        scale: (43.0, -43.0),
+        scale: (70.0, -70.0),
     };
+
+    // for x in 0..img.width() as i64 {
+    //     for y in 0..img.height() as i64 {
+    //
+    //
+    //         let chan_center = ((x * 2) as u32, (y * 2) as u32);
+    //         img.put_pixel(chan_center.0, chan_center.1, image::Rgb([255, 255, 255]));
+    //         if graph.maze.contains_edge((x, y), (x+1, y)) {
+    //             img.put_pixel(chan_center.0 + 1, chan_center.1, image::Rgb([255, 255, 255]));
+    //         }
+    //         if graph.maze.contains_edge((x, y), (x, y+1)) {
+    //             img.put_pixel(chan_center.0, chan_center.1 + 1, image::Rgb([255, 255, 255]));
+    //         }
+    //     }
+    // }
+
+    // draw the grid
     for r in 1..graph.radius + 2 {
-        let circle = Circle {
-            center: (0.0, 0.0),
-            radius: r as f64 * graph.cell_size,
-            line_width: 0.05,
-            color: Rgb([0, 0, 0]),
+        let circle = DrawableCircle {
+            circle: Circle {
+                center: (0.0, 0.0),
+                radius: r as f64 * graph.cell_size,
+            },
+            line_width: 0.01,
+            color: Rgb([0, 0, 255]),
         };
         draw_circle(&mut img, circle, transform);
         if r <= graph.radius {
@@ -279,86 +315,83 @@ fn main() {
                 let angle = (n as f64) / (count as f64) * 2.0 * PI;
                 let p1 = polar_to_cart((r as f64 * graph.cell_size, angle));
                 let p2 = polar_to_cart((r as f64 * graph.cell_size + graph.cell_size, angle));
-                let segment = Segment {
-                    p1,
-                    p2,
-                    line_width: 0.05,
-                    color: Rgb([0, 0, 0]),
+                let segment = DrawableSegment {
+                    segment: Segment { p1, p2 },
+                    line_width: 0.01,
+                    color: Rgb([0, 0, 255]),
                 };
                 draw_segment(&mut img, segment, transform);
             }
         }
     }
-
-    let mut rng = thread_rng();
-    println!("Done drawing grid, draw edges");
-    for e in graph.maze.all_edges() {
-        let c1 = graph.nodes_at_radius(e.0 .0);
-        let p1 = polar_to_cart((
-            (e.0 .0 as f64 + 0.5) * graph.cell_size,
-            (e.0 .1 as f64 + 0.5) / (c1 as f64) * 2.0 * PI,
-        ));
-
-        let c2 = graph.nodes_at_radius(e.1 .0);
-        let p2 = polar_to_cart((
-            (e.1 .0 as f64 + 0.5) * graph.cell_size,
-            (e.1 .1 as f64 + 0.5) / (c2 as f64) * 2.0 * PI,
-        ));
-
-        let segment = Segment {
-            p1,
-            p2,
-            line_width: 0.8,
-            color: Rgb([
-                // rng.next_u32() as u8,
-                // rng.next_u32() as u8,
-                // rng.next_u32() as u8,
-                255, 255, 255
-            ]),
-        };
-        draw_segment(&mut img, segment, transform);
-    }
-
-    // for r in 1..graph.radius + 2 {
-    //     if r <= graph.radius {
-    //         let count = graph.nodes_at_radius(r);
-    //         println!("{} {}", r, count);
-    //         for n in 0..count {
-    //             let p = polar_to_cart((
-    //                 (r as f64 + 0.5) * graph.cell_size,
-    //                 (n as f64 + 0.5) / (graph.nodes_at_radius(r) as f64) * 2.0 * PI,
-    //             ));
     //
-    //             let tx = (p.0 * transform.scale.0) + transform.offset.0;
-    //             let ty = (p.1 * transform.scale.1) + transform.offset.1;
+    // let mut rng = thread_rng();
+    // println!("Done drawing grid, draw edges");
+    // for e in graph.maze.all_edges() {
+    //     let c1 = graph.nodes_at_radius(e.0 .0);
+    //     let p1 = polar_to_cart((
+    //         (e.0 .0 as f64 + 0.5) * graph.cell_size,
+    //         (e.0 .1 as f64 + 0.5) / (c1 as f64) * 2.0 * PI,
+    //     ));
     //
-    //             draw_text_mut(
-    //                 &mut img,
-    //                 Rgb([255, 0, 0]),
-    //                 tx.round() as i32,
-    //                 ty.round() as i32,
-    //                 font_scale,
-    //                 font,
-    //                 &*format!("({}, {})", r, n),
-    //             );
-    //             // println!("{}, {}", tx.round() as i32,
-    //             //          ty.round() as i32,);
-    //         }
-    //     }
+    //     let c2 = graph.nodes_at_radius(e.1 .0);
+    //     let p2 = polar_to_cart((
+    //         (e.1 .0 as f64 + 0.5) * graph.cell_size,
+    //         (e.1 .1 as f64 + 0.5) / (c2 as f64) * 2.0 * PI,
+    //     ));
+    //
+    //     let segment = DrawableSegment {
+    //         segment: Segment { p1, p2 },
+    //         line_width: 0.8,
+    //         color: Rgb([
+    //             // rng.next_u32() as u8,
+    //             // rng.next_u32() as u8,
+    //             // rng.next_u32() as u8,
+    //             255, 255, 255,
+    //         ]),
+    //     };
+    //     draw_segment(&mut img, segment, transform);
     // }
 
+    // draw sector labels
+    for r in 1..graph.radius + 2 {
+        if r <= graph.radius {
+            let count = graph.nodes_at_radius(r);
+            println!("{} {}", r, count);
+            for n in 0..count {
+                let p = polar_to_cart((
+                    (r as f64 + 0.5) * graph.cell_size,
+                    (n as f64 + 0.5) / (graph.nodes_at_radius(r) as f64) * 2.0 * PI,
+                ));
+
+                let tx = (p.0 * transform.scale.0) + transform.offset.0;
+                let ty = (p.1 * transform.scale.1) + transform.offset.1;
+
+                draw_text_mut(
+                    &mut img,
+                    Rgb([255, 0, 0]),
+                    tx.round() as i32,
+                    ty.round() as i32,
+                    font_scale,
+                    font,
+                    &*format!("({}, {})", r, n),
+                );
+                // println!("{}, {}", tx.round() as i32,
+                //          ty.round() as i32,);
+            }
+        }
+    }
+
+    // draw the walls
+    for px in 0..img.width() {
+        for py in 0..img.height() {
+            if graph.is_in_wall(to_canvas_space((px, py), transform)) {
+                img.put_pixel(px, py, Rgb([0, 0, 0]));
+            }
+        }
+    }
+
     img.save("maze_out.png").unwrap();
-
-
-
-
-
-
-
-
-
-
-
 
     //
     // print!("{}\n", graph.maze.node_count().to_string());
