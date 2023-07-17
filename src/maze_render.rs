@@ -178,7 +178,6 @@ impl GetWall<CircleNode> for CircleMaze {
             }
         }
 
-        // first the outer-most segment
         return false;
     }
 }

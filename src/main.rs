@@ -324,7 +324,7 @@ fn main() {
             }
         }
     }
-    //
+
     // let mut rng = thread_rng();
     // println!("Done drawing grid, draw edges");
     // for e in graph.maze.all_edges() {
