@@ -149,24 +149,23 @@ impl GetWall<CircleNode> for CircleMaze {
                     return true;
                 }
             } else {
-                let npp = self.get_node_pol_point(n);
-                let tpp = self.get_node_pol_point(touching);
-                let mut arc: Arc = Arc {
+                let (npp_radius, npp_theta) = self.get_node_pol_point(n);
+                let (_, npp_theta_plus_1) = self.get_node_pol_point((n.0, n.1 + 1));
+                let (tpp_radius, tpp_theta) = self.get_node_pol_point(touching);
+                let (_, tpp_theta_plus_1) = self.get_node_pol_point((touching.0, touching.1 + 1));
+
+                let mut thetas = vec![npp_theta, npp_theta_plus_1, tpp_theta, tpp_theta_plus_1];
+
+                //pro gamer avoid dividing my zero
+                thetas.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                let arc: Arc = Arc {
                     circle: Circle {
                         center: (0.0, 0.0),
-                        radius: tpp.0.max(npp.0),
+                        radius: npp_radius.max(tpp_radius)
                     },
-                    a1: 0.0,
-                    a2: 0.0,
+                    a1: thetas[1],
+                    a2: thetas[2],
                 };
-                if npp.1 > tpp.1 {
-                    arc.a1 = npp.1;
-                    arc.a2 = tpp.1;
-                } else {
-                    let next_tpp = self.get_node_pol_point(self.next_node(touching, 1));
-                    arc.a1 = tpp.1;
-                    arc.a2 = next_tpp.1;
-                }
 
                 if distance_to_arc(&arc, p) <= self.wall_width
                     && !self
