@@ -1,4 +1,7 @@
 use crate::maze_gen::{CircleMaze, CircleNode};
+use bevy::math::{Vec2, Vec3};
+use bevy::prelude::{shape, Mesh};
+use bevy::render::mesh::{Indices, PrimitiveTopology};
 use petgraph::graphmap::NodeTrait;
 use std::f64::consts::PI;
 
@@ -23,8 +26,8 @@ pub struct Arc {
 }
 
 pub trait GetWall<N: NodeTrait> {
-    /// Gets the wall segment between two nodes, in polar coordinates
-    fn get_wall_between(&self, n1: N, n2: N) -> ((f64, f64), (f64, f64));
+    /// Gets the wall
+    fn get_wall_geometry(&self, height: f64) -> Mesh;
 
     /// Determine if a point is in a wall
     fn is_in_wall(&self, p: (f64, f64)) -> bool;
@@ -77,6 +80,90 @@ pub fn distance_to_segment(segment: &Segment, p: (f64, f64)) -> f64 {
     return (seg_p.0 * seg_p.0 + seg_p.1 * seg_p.1).sqrt();
 }
 
+/// Get the mesh of a segment. The corners are listed clockwise.
+pub fn get_segment_mesh(segment: &Segment, width: f32, height: f32) -> Mesh {
+    // get the vector perpendicular to <p2-p1>
+    let vp1 = Vec2::from((segment.p1.0 as f32, segment.p1.1 as f32));
+    let vp2 = Vec2::from((segment.p2.0 as f32, segment.p2.1 as f32));
+    let vp = vp2 - vp1;
+    let normal = Vec2::from((vp.y, -vp.x)).normalize() * width;
+    let n_norm = -normal;
+
+    let vp_unit = vp.normalize();
+    let face_vp_unit = [vp_unit.x, 0.0, vp_unit.y];
+    let n_face_vp_unit = [-vp_unit.x, 0.0, -vp_unit.y];
+    let face_norm = [normal.x, 0.0, normal.y];
+    let n_face_norm = [-normal.x, 0.0, -normal.y];
+
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
+
+    let v = vec![
+        // bottom
+        [(normal + vp1).x, 0.0, (normal + vp1).y],
+        [(n_norm + vp1).x, 0.0, (n_norm + vp1).y],
+        [(normal + vp2).x, 0.0, (normal + vp2).y],
+        [(n_norm + vp2).x, 0.0, (n_norm + vp2).y],
+        // top
+        [(normal + vp1).x, height, (normal + vp1).y],
+        [(n_norm + vp1).x, height, (n_norm + vp1).y],
+        [(normal + vp2).x, height, (normal + vp2).y],
+        [(n_norm + vp2).x, height, (n_norm + vp2).y],
+    ];
+
+    let complete_vertices = &[
+        // Front
+        (v[1], n_face_norm, [0., 0.]),
+        (v[3], n_face_norm, [1.0, 0.]),
+        (v[5], n_face_norm, [1.0, 1.0]),
+        (v[7], n_face_norm, [0., 1.0]),
+        // Back
+        (v[0], face_norm, [1.0, 0.]),
+        (v[2], face_norm, [0., 0.]),
+        (v[4], face_norm, [0., 1.0]),
+        (v[6], face_norm, [1.0, 1.0]),
+        // Right
+        (v[2], face_vp_unit, [0., 0.]),
+        (v[3], face_vp_unit, [1.0, 0.]),
+        (v[6], face_vp_unit, [1.0, 1.0]),
+        (v[7], face_vp_unit, [0., 1.0]),
+        // Left
+        (v[0], n_face_vp_unit, [1.0, 0.]),
+        (v[1], n_face_vp_unit, [0., 0.]),
+        (v[4], n_face_vp_unit, [0., 1.0]),
+        (v[5], n_face_vp_unit, [1.0, 1.0]),
+        // Top
+        (v[4], [0., 1.0, 0.], [1.0, 0.]),
+        (v[6], [0., 1.0, 0.], [0., 0.]),
+        (v[5], [0., 1.0, 0.], [0., 1.0]),
+        (v[7], [0., 1.0, 0.], [1.0, 1.0]),
+        // Bottom
+        (v[0], [0., -1.0, 0.], [0., 0.]),
+        (v[1], [0., -1.0, 0.], [1.0, 0.]),
+        (v[2], [0., -1.0, 0.], [1.0, 1.0]),
+        (v[3], [0., -1.0, 0.], [0., 1.0]),
+    ];
+
+    let positions: Vec<_> = complete_vertices.iter().map(|(p, _, _)| *p).collect();
+    let normals: Vec<_> = complete_vertices.iter().map(|(_, n, _)| *n).collect();
+    let uvs: Vec<_> = complete_vertices.iter().map(|(_, _, uv)| *uv).collect();
+
+    let indices = Indices::U32(vec![
+        0, 1, 2, 2, 3, 0, // front
+        4, 5, 6, 6, 7, 4, // back
+        8, 9, 10, 10, 11, 8, // right
+        12, 13, 14, 14, 15, 12, // left
+        16, 17, 18, 18, 19, 16, // top
+        20, 21, 22, 22, 23, 20, // bottom
+    ]);
+
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.set_indices(Some(indices));
+    return mesh;
+}
+
 /// get the closest distance from a point to any point on an arc
 pub fn distance_to_arc(arc: &Arc, p: (f64, f64)) -> f64 {
     let p = (p.0 - arc.circle.center.0, p.1 - arc.circle.center.1);
@@ -110,8 +197,8 @@ impl CircleMaze {
 }
 
 impl GetWall<CircleNode> for CircleMaze {
-    fn get_wall_between(&self, n1: CircleNode, n2: CircleNode) -> ((f64, f64), (f64, f64)) {
-        return ((0.0, 0.0), (0.0, 0.0));
+    fn get_wall_geometry(&self, height: f64) -> Mesh {
+        todo!()
     }
 
     fn is_in_wall(&self, p: (f64, f64)) -> bool {
@@ -161,7 +248,7 @@ impl GetWall<CircleNode> for CircleMaze {
                 let arc: Arc = Arc {
                     circle: Circle {
                         center: (0.0, 0.0),
-                        radius: npp_radius.max(tpp_radius)
+                        radius: npp_radius.max(tpp_radius),
                     },
                     a1: thetas[1],
                     a2: thetas[2],

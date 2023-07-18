@@ -211,9 +211,9 @@ fn main() {
         maze: CircleMazeComponent::new(),
         cell_size: 1.0,
         center: (0, 0),
-        radius: 4,
-        min_path_width: 0.5,
-        wall_width: 0.05
+        radius: 25,
+        min_path_width: 1.0,
+        wall_width: 0.1
     };
 
     // let node_count: u32 = 64;
@@ -279,7 +279,7 @@ fn main() {
 
     let transform = AxisTransform {
         offset: (img.width() as f64 / 2.0, img.height() as f64 / 2.0),
-        scale: (70.0, -70.0),
+        scale: (17.0, -17.0),
     };
 
     // for x in 0..img.width() as i64 {
@@ -298,32 +298,32 @@ fn main() {
     // }
 
     // draw the grid
-    for r in 1..graph.radius + 2 {
-        let circle = DrawableCircle {
-            circle: Circle {
-                center: (0.0, 0.0),
-                radius: r as f64 * graph.cell_size,
-            },
-            line_width: 0.01,
-            color: Rgb([0, 0, 255]),
-        };
-        draw_circle(&mut img, circle, transform);
-        if r <= graph.radius {
-            let count = graph.nodes_at_radius(r);
-            println!("{} {}", r, count);
-            for n in 0..count {
-                let angle = (n as f64) / (count as f64) * 2.0 * PI;
-                let p1 = polar_to_cart((r as f64 * graph.cell_size, angle));
-                let p2 = polar_to_cart((r as f64 * graph.cell_size + graph.cell_size, angle));
-                let segment = DrawableSegment {
-                    segment: Segment { p1, p2 },
-                    line_width: 0.01,
-                    color: Rgb([0, 0, 255]),
-                };
-                draw_segment(&mut img, segment, transform);
-            }
-        }
-    }
+    // for r in 1..graph.radius + 2 {
+    //     let circle = DrawableCircle {
+    //         circle: Circle {
+    //             center: (0.0, 0.0),
+    //             radius: r as f64 * graph.cell_size,
+    //         },
+    //         line_width: 0.01,
+    //         color: Rgb([0, 0, 255]),
+    //     };
+    //     draw_circle(&mut img, circle, transform);
+    //     if r <= graph.radius {
+    //         let count = graph.nodes_at_radius(r);
+    //         println!("{} {}", r, count);
+    //         for n in 0..count {
+    //             let angle = (n as f64) / (count as f64) * 2.0 * PI;
+    //             let p1 = polar_to_cart((r as f64 * graph.cell_size, angle));
+    //             let p2 = polar_to_cart((r as f64 * graph.cell_size + graph.cell_size, angle));
+    //             let segment = DrawableSegment {
+    //                 segment: Segment { p1, p2 },
+    //                 line_width: 0.01,
+    //                 color: Rgb([0, 0, 255]),
+    //             };
+    //             draw_segment(&mut img, segment, transform);
+    //         }
+    //     }
+    // }
 
     // let mut rng = thread_rng();
     // println!("Done drawing grid, draw edges");
@@ -354,33 +354,33 @@ fn main() {
     // }
 
     // draw sector labels
-    for r in 1..graph.radius + 2 {
-        if r <= graph.radius {
-            let count = graph.nodes_at_radius(r);
-            println!("{} {}", r, count);
-            for n in 0..count {
-                let p = polar_to_cart((
-                    (r as f64 + 0.5) * graph.cell_size,
-                    (n as f64 + 0.5) / (graph.nodes_at_radius(r) as f64) * 2.0 * PI,
-                ));
-
-                let tx = (p.0 * transform.scale.0) + transform.offset.0;
-                let ty = (p.1 * transform.scale.1) + transform.offset.1;
-
-                draw_text_mut(
-                    &mut img,
-                    Rgb([255, 0, 0]),
-                    tx.round() as i32,
-                    ty.round() as i32,
-                    font_scale,
-                    font,
-                    &*format!("({}, {})", r, n),
-                );
-                // println!("{}, {}", tx.round() as i32,
-                //          ty.round() as i32,);
-            }
-        }
-    }
+    // for r in 1..graph.radius + 2 {
+    //     if r <= graph.radius {
+    //         let count = graph.nodes_at_radius(r);
+    //         println!("{} {}", r, count);
+    //         for n in 0..count {
+    //             let p = polar_to_cart((
+    //                 (r as f64 + 0.5) * graph.cell_size,
+    //                 (n as f64 + 0.5) / (graph.nodes_at_radius(r) as f64) * 2.0 * PI,
+    //             ));
+    //
+    //             let tx = (p.0 * transform.scale.0) + transform.offset.0;
+    //             let ty = (p.1 * transform.scale.1) + transform.offset.1;
+    //
+    //             draw_text_mut(
+    //                 &mut img,
+    //                 Rgb([255, 0, 0]),
+    //                 tx.round() as i32,
+    //                 ty.round() as i32,
+    //                 font_scale,
+    //                 font,
+    //                 &*format!("({}, {})", r, n),
+    //             );
+    //             // println!("{}, {}", tx.round() as i32,
+    //             //          ty.round() as i32,);
+    //         }
+    //     }
+    // }
 
     // draw the walls
     for px in 0..img.width() {

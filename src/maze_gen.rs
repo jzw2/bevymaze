@@ -385,7 +385,7 @@ impl<N: NodeTrait, E: Clone> GetRandomNode<N, E> for UnGraphMap<N, E> {
         if self.edge_count() == 0 {
             return None;
         }
-        let rng = &mut StdRng::seed_from_u64(42);
+        let rng = &mut thread_rng();
         let mut source = neighbor_of;
         let mut edge: Option<(N, N)> = None;
         if source.is_none() {
