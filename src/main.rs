@@ -195,28 +195,8 @@ fn setup(
         },
         0.5,
         3.0,
-        10,
+        1000,
     );
-    if let VertexAttributeValues::Float32x3(v) =
-        arc_mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap()
-    {
-        for p in v.iter().enumerate() {
-            println!("p {}: ({}, {}, {})", p.0, p.1[0], p.1[1], p.1[2]);
-        }
-    }
-
-    // for idx in arc_mesh.indices().unwrap().iter().enumerate() {
-    //     if idx.0 % 3 == 0 {
-    //         println!("--- next face");
-    //     }
-    //     println!("idx {}", idx.1);
-    // }
-    if let VertexAttributeValues::Float32x3(v) = arc_mesh.attribute(Mesh::ATTRIBUTE_NORMAL).unwrap()
-    {
-        for p in v.iter().enumerate() {
-            println!("n {}: ({}, {}, {})", p.0, p.1[0], p.1[1], p.1[2]);
-        }
-    }
 
     commands.spawn(PbrBundle {
         mesh: meshes.add(edited_cube),
@@ -253,7 +233,7 @@ fn setup(
             shadows_enabled: true,
             ..default()
         },
-        transform: Transform::from_xyz(4.0, 100.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
+        transform: Transform::from_xyz(75.0, 100.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
         ..default()
     });
     commands.insert_resource(AmbientLight {
@@ -261,15 +241,6 @@ fn setup(
         brightness: 1.0,
     });
     commands.insert_resource(ClearColor(Color::rgb_u8(135, 206, 235)));
-    commands.spawn(DirectionalLightBundle {
-        directional_light: DirectionalLight {
-            illuminance: 64000.0,
-            shadows_enabled: true,
-            ..default()
-        },
-        transform: Transform::from_xyz(4.0, 100.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
-        ..default()
-    });
     // camera
     spawn_camera(commands)
 }
