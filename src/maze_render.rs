@@ -86,6 +86,7 @@ pub fn get_segment_mesh(segment: &Segment, width: f32, height: f32) -> Mesh {
     let vp1 = Vec2::from((segment.p1.0 as f32, segment.p1.1 as f32));
     let vp2 = Vec2::from((segment.p2.0 as f32, segment.p2.1 as f32));
     let vp = vp2 - vp1;
+    // clockwise normal
     let normal = Vec2::from((vp.y, -vp.x)).normalize() * width;
     let n_norm = -normal;
 
@@ -94,8 +95,6 @@ pub fn get_segment_mesh(segment: &Segment, width: f32, height: f32) -> Mesh {
     let n_face_vp_unit = [-vp_unit.x, 0.0, -vp_unit.y];
     let face_norm = [normal.x, 0.0, normal.y];
     let n_face_norm = [-normal.x, 0.0, -normal.y];
-
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
 
     let v = vec![
         // bottom
@@ -181,6 +180,212 @@ pub fn distance_to_arc(arc: &Arc, p: (f64, f64)) -> f64 {
     let a2_p = polar_to_cart((arc.circle.radius, arc.a2));
 
     return dist(a1_p, p).min(dist(a2_p, p));
+}
+
+/// Get an "extrusion mesh" of an arc, with the curve on the x-z plane
+/// `divisions` is how many points between `a1` and `a2` to include
+pub fn get_arc_mesh(arc: &Arc, width: f32, height: f32, divisions: u32) -> Mesh {
+    let divisions = divisions + 2;
+
+    // simple vertex positions
+    let mut v: Vec<[f32; 3]> = Vec::new();
+
+    // first construct the list of points that make up the bottom of the arc mesh
+    for i in 0..divisions {
+        // we are parametrically walking around the arc, sampling points
+        let t = (i as f64) / (divisions as f64 - 1.0);
+        // inner points are the points closest to the center
+        let inner_point = polar_to_cart((
+            arc.circle.radius - width as f64,
+            (arc.a2 - arc.a1) * t + arc.a1,
+        ));
+        // outer points are the points furthest from the center
+        let outer_point = polar_to_cart((
+            arc.circle.radius + width as f64,
+            (arc.a2 - arc.a1) * t + arc.a1,
+        ));
+        v.push([
+            (inner_point.0 + arc.circle.center.0) as f32,
+            0.0,
+            (inner_point.1 + arc.circle.center.1) as f32,
+        ]);
+        v.push([
+            (outer_point.0 + arc.circle.center.0) as f32,
+            0.0,
+            (outer_point.1 + arc.circle.center.1) as f32,
+        ]);
+    }
+    // maybe someone smarter can compress this into one loop, but that person is not me
+    for i in 0..divisions {
+        // we are parametrically walking around the arc, sampling points
+        let t = (i as f64) / (divisions as f64 - 1.0);
+        // inner points are the points closest to the center
+        let inner_point = polar_to_cart((
+            arc.circle.radius - width as f64,
+            (arc.a2 - arc.a1) * t + arc.a1,
+        ));
+        // outer points are the points furthest from the center
+        let outer_point = polar_to_cart((
+            arc.circle.radius + width as f64,
+            (arc.a2 - arc.a1) * t + arc.a1,
+        ));
+        v.push([
+            (inner_point.0 + arc.circle.center.0) as f32,
+            height,
+            (inner_point.1 + arc.circle.center.1) as f32,
+        ]);
+        v.push([
+            (outer_point.0 + arc.circle.center.0) as f32,
+            height,
+            (outer_point.1 + arc.circle.center.1) as f32,
+        ]);
+    }
+
+    // the vertices with their normals and UV
+    let mut vertices: Vec<([f32; 3], [f32; 3], [f32; 2])> = vec![];
+    // the index positions; we update this every time we add a new quad
+    let mut indices: Vec<u32> = vec![];
+    let mut cur_idx_set = 0u32;
+
+    // get the indices of the face in clockwise order
+    let mut cw_indices = |cur_idx_set: u32| {
+        let i = cur_idx_set * 4;
+        return vec![i, i + 1, i + 2, i + 3, i + 2, i + 1];
+    };
+
+    // get the indices of the face in counterclockwise order
+    let mut cc_indices = |cur_idx_set: u32| {
+        let i = cur_idx_set * 4;
+        return vec![i + 2, i + 1, i, i + 1, i + 2, i + 3];
+    };
+
+    // create the bottom
+    let b_norm = [0.0f32, -1.0, 0.0];
+    for i in 0..divisions - 1 {
+        let i0 = (i * 2) as usize;
+        let i1 = i0 + 1;
+        let i2 = i0 + 2;
+        let i3 = i0 + 3;
+        vertices.append(&mut vec![
+            (v[i0], b_norm, [0.0, 0.]),
+            (v[i1], b_norm, [1.0, 0.]),
+            (v[i2], b_norm, [0.0, 1.]),
+            (v[i3], b_norm, [1.0, 1.]),
+        ]);
+        // add verts clockwise
+        indices.append(&mut cw_indices(cur_idx_set));
+        cur_idx_set += 1;
+    }
+    // create the top
+    let t_norm = [0.0f32, 1.0, 0.0];
+    for i in 0..divisions - 1 {
+        let i0 = (i * 2 + divisions * 2) as usize;
+        let i1 = i0 + 1;
+        let i2 = i0 + 2;
+        let i3 = i0 + 3;
+        vertices.append(&mut vec![
+            (v[i0], t_norm, [0.0, 0.]),
+            (v[i1], t_norm, [1.0, 0.]),
+            (v[i2], t_norm, [0.0, 1.]),
+            (v[i3], t_norm, [1.0, 1.]),
+        ]);
+        indices.append(&mut cc_indices(cur_idx_set));
+        cur_idx_set += 1;
+    }
+
+    // inner
+    for i in 0..divisions - 1 {
+        let i0 = (i * 2) as usize;
+        let i1 = i0 + 2;
+        let i2 = i0 + 2 * divisions as usize;
+        let i3 = i2 + 2;
+
+        let i0_norm = (Vec3::from(v[i0]) - Vec3::from(v[i0 + 1])).normalize();
+        let i0_norm = [i0_norm.x, i0_norm.y, i0_norm.z];
+
+        let i1_norm = (Vec3::from(v[i1]) - Vec3::from(v[i1 + 1])).normalize();
+        let i1_norm = [i1_norm.x, i1_norm.y, i1_norm.z];
+
+        vertices.append(&mut vec![
+            (v[i0], i0_norm, [0.0, 0.]),
+            (v[i1], i0_norm, [1.0, 0.]),
+            (v[i2], i1_norm, [0.0, 1.]),
+            (v[i3], i1_norm, [1.0, 1.]),
+        ]);
+        indices.append(&mut cw_indices(cur_idx_set));
+        cur_idx_set += 1;
+    }
+
+    // outer
+    for i in 0..divisions - 1 {
+        let i0 = (i * 2) as usize + 1;
+        let i1 = i0 + 2;
+        let i2 = i0 + 2 * divisions as usize;
+        let i3 = i2 + 2;
+
+        let i0_norm = (Vec3::from(v[i0]) - Vec3::from(v[i0 - 1])).normalize();
+        let i0_norm = [i0_norm.x, i0_norm.y, i0_norm.z];
+
+        let i1_norm = (Vec3::from(v[i1]) - Vec3::from(v[i1 - 1])).normalize();
+        let i1_norm = [i1_norm.x, i1_norm.y, i1_norm.z];
+
+        vertices.append(&mut vec![
+            (v[i0], i0_norm, [0.0, 0.]),
+            (v[i1], i0_norm, [1.0, 0.]),
+            (v[i2], i1_norm, [0.0, 1.]),
+            (v[i3], i1_norm, [1.0, 1.]),
+        ]);
+        indices.append(&mut cc_indices(cur_idx_set));
+        cur_idx_set += 1;
+    }
+
+    // clockwise end
+    let i0 = 0usize;
+    let i1 = 1usize;
+    let i2 = 2 * divisions as usize;
+    let i3 = i2 + 1;
+    // clockwise normal to the inner normal
+    // should point clockwise along the circle after rotation
+    let c_norm = (Vec3::from(v[i0]) - Vec3::from(v[i0 + 1])).normalize();
+    let c_norm = [c_norm.z, c_norm.y, -c_norm.x];
+    vertices.append(&mut vec![
+        (v[i0], c_norm, [0.0, 0.]),
+        (v[i1], c_norm, [1.0, 0.]),
+        (v[i2], c_norm, [0.0, 1.]),
+        (v[i3], c_norm, [1.0, 1.]),
+    ]);
+    indices.append(&mut cc_indices(cur_idx_set));
+    cur_idx_set += 1;
+
+    // counterclockwise end
+    let i0 = (2 * divisions - 2) as usize;
+    let i1 = i0 + 1;
+    let i2 = (2 * 2 * divisions - 2) as usize;
+    let i3 = i2 + 1;
+    // clockwise normal to the outer normal
+    // should point counterclockwise along the circle after the clockwise rotation (confusingly)
+    let cc_norm = (Vec3::from(v[i0 + 1]) - Vec3::from(v[i0])).normalize();
+    let cc_norm = [cc_norm.z, cc_norm.y, -cc_norm.x];
+    vertices.append(&mut vec![
+        (v[i0], cc_norm, [0.0, 0.]),
+        (v[i1], cc_norm, [1.0, 0.]),
+        (v[i2], cc_norm, [0.0, 1.]),
+        (v[i3], cc_norm, [1.0, 1.]),
+    ]);
+    indices.append(&mut cw_indices(cur_idx_set));
+    cur_idx_set += 1;
+
+    let positions: Vec<_> = vertices.iter().map(|(p, _, _)| *p).collect();
+    let normals: Vec<_> = vertices.iter().map(|(_, n, _)| *n).collect();
+    let uvs: Vec<_> = vertices.iter().map(|(_, _, uv)| *uv).collect();
+
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    // mesh.compute_flat_normals();
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.set_indices(Some(Indices::U32(indices)));
+    return mesh;
 }
 
 impl CircleMaze {

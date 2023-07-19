@@ -8,12 +8,16 @@ use crate::maze_gen::{
     populate_maze, CircleMaze, CircleMazeComponent, CircleNode, Maze, SquareMaze,
     SquareMazeComponent, SquareNode,
 };
-use crate::test_render::{draw_circle, draw_segment, AxisTransform, DrawableCircle, DrawableSegment, to_canvas_space};
-// use bevy::input::mouse::{MouseMotion, MouseWheel};
-// use bevy::prelude::*;
-// use bevy::render::camera::Projection;
-// use bevy::window::PrimaryWindow;
-use crate::maze_render::{polar_to_cart, Circle, Segment, GetWall};
+use crate::maze_render::{get_arc_mesh, polar_to_cart, Arc, Circle, GetWall, Segment};
+use crate::test_render::{
+    draw_circle, draw_segment, to_canvas_space, AxisTransform, DrawableCircle, DrawableSegment,
+};
+use bevy::input::mouse::{MouseMotion, MouseWheel};
+use bevy::math::Vec3;
+use bevy::prelude::*;
+use bevy::render::camera::Projection;
+use bevy::render::mesh::VertexAttributeValues;
+use bevy::window::PrimaryWindow;
 use image::io::Reader as ImageReader;
 use image::{ImageBuffer, Rgb, RgbImage};
 use imageproc::drawing::{draw_text, draw_text_mut};
@@ -24,208 +28,281 @@ use std::fmt::format;
 use std::io::Cursor;
 
 // /// Tags an entity as capable of panning and orbiting.
-// #[derive(Component)]
-// struct PanOrbitCamera {
-//     /// The "focus point" to orbit around. It is automatically updated when panning the camera
-//     pub focus: Vec3,
-//     pub radius: f32,
-//     pub upside_down: bool,
-// }
-//
-// impl Default for PanOrbitCamera {
-//     fn default() -> Self {
-//         PanOrbitCamera {
-//             focus: Vec3::ZERO,
-//             radius: 5.0,
-//             upside_down: false,
-//         }
-//     }
-// }
-//
-// /// Pan the camera with middle mouse click, zoom with scroll wheel, orbit with right mouse click.
-// fn pan_orbit_camera(
-//     windows: Query<&Window, With<PrimaryWindow>>,
-//     mut ev_motion: EventReader<MouseMotion>,
-//     mut ev_scroll: EventReader<MouseWheel>,
-//     input_mouse: Res<Input<MouseButton>>,
-//     mut query: Query<(&mut PanOrbitCamera, &mut Transform, &Projection)>,
-// ) {
-//     // change input mapping for orbit and panning here
-//     let orbit_button = MouseButton::Right;
-//     let pan_button = MouseButton::Middle;
-//
-//     let mut pan = Vec2::ZERO;
-//     let mut rotation_move = Vec2::ZERO;
-//     let mut scroll = 0.0;
-//     let mut orbit_button_changed = false;
-//
-//     if input_mouse.pressed(orbit_button) {
-//         for ev in ev_motion.iter() {
-//             rotation_move += ev.delta;
-//         }
-//     } else if input_mouse.pressed(pan_button) {
-//         // Pan only if we're not rotating at the moment
-//         for ev in ev_motion.iter() {
-//             pan += ev.delta;
-//         }
-//     }
-//     for ev in ev_scroll.iter() {
-//         scroll += ev.y;
-//     }
-//     if input_mouse.just_released(orbit_button) || input_mouse.just_pressed(orbit_button) {
-//         orbit_button_changed = true;
-//     }
-//
-//     for (mut pan_orbit, mut transform, projection) in query.iter_mut() {
-//         if orbit_button_changed {
-//             // only check for upside down when orbiting started or ended this frame
-//             // if the camera is "upside" down, panning horizontally would be inverted, so invert the input to make it correct
-//             let up = transform.rotation * Vec3::Y;
-//             pan_orbit.upside_down = up.y <= 0.0;
-//         }
-//
-//         let mut any = false;
-//         if rotation_move.length_squared() > 0.0 {
-//             any = true;
-//             let window = get_primary_window_size(&windows);
-//             let delta_x = {
-//                 let delta = rotation_move.x / window.x * std::f32::consts::PI * 2.0;
-//                 if pan_orbit.upside_down {
-//                     -delta
-//                 } else {
-//                     delta
-//                 }
-//             };
-//             let delta_y = rotation_move.y / window.y * std::f32::consts::PI;
-//             let yaw = Quat::from_rotation_y(-delta_x);
-//             let pitch = Quat::from_rotation_x(-delta_y);
-//             transform.rotation = yaw * transform.rotation; // rotate around global y axis
-//             transform.rotation = transform.rotation * pitch; // rotate around local x axis
-//         } else if pan.length_squared() > 0.0 {
-//             any = true;
-//             // make panning distance independent of resolution and FOV,
-//             let window = get_primary_window_size(&windows);
-//             if let Projection::Perspective(projection) = projection {
-//                 pan *= Vec2::new(projection.fov * projection.aspect_ratio, projection.fov) / window;
-//             }
-//             // translate by local axes
-//             let right = transform.rotation * Vec3::X * -pan.x;
-//             let up = transform.rotation * Vec3::Y * pan.y;
-//             // make panning proportional to distance away from focus point
-//             let translation = (right + up) * pan_orbit.radius;
-//             pan_orbit.focus += translation;
-//         } else if scroll.abs() > 0.0 {
-//             any = true;
-//             pan_orbit.radius -= scroll * pan_orbit.radius * 0.2;
-//             // dont allow zoom to reach zero or you get stuck
-//             pan_orbit.radius = f32::max(pan_orbit.radius, 0.05);
-//         }
-//
-//         if any {
-//             // emulating parent/child to make the yaw/y-axis rotation behave like a turntable
-//             // parent = x and y rotation
-//             // child = z-offset
-//             let rot_matrix = Mat3::from_quat(transform.rotation);
-//             transform.translation =
-//                 pan_orbit.focus + rot_matrix.mul_vec3(Vec3::new(0.0, 0.0, pan_orbit.radius));
-//         }
-//     }
-//
-//     // consume any remaining events, so they don't pile up if we don't need them
-//     // (and also to avoid Bevy warning us about not checking events every frame update)
-//     ev_motion.clear();
-// }
-//
-// fn get_primary_window_size(windows: &Query<&Window, With<PrimaryWindow>>) -> Vec2 {
-//     let window = windows.get_single().unwrap();
-//     let window = Vec2::new(window.width() as f32, window.height() as f32);
-//     window
-// }
-//
-// /// Spawn a camera like this
-// fn spawn_camera(mut commands: Commands) {
-//     let translation = Vec3::new(-2.0, 2.5, 5.0);
-//     let radius = translation.length();
-//
-//     commands.spawn((
-//         Camera3dBundle {
-//             transform: Transform::from_translation(translation).looking_at(Vec3::ZERO, Vec3::Y),
-//             ..Default::default()
-//         },
-//         PanOrbitCamera {
-//             radius,
-//             ..Default::default()
-//         },
-//     ));
-// }
-//
-// /// set up a simple 3D scene
-// fn setup(
-//     mut commands: Commands,
-//     mut meshes: ResMut<Assets<Mesh>>,
-//     mut materials: ResMut<Assets<StandardMaterial>>,
-// ) {
-//     // plane
-//     commands.spawn(PbrBundle {
-//         mesh: meshes.add(shape::Plane::from_size(10.0).into()),
-//         material: materials.add(Color::rgb(0.3, 0.5, 0.3).into()),
-//         ..default()
-//     });
-//     let edited_cube = Mesh::from(shape::Box {
-//         min_x: -5.0,
-//         min_y: -0.5,
-//         min_z: -5.0,
-//         max_x: 0.0,
-//         max_y: 1.0,
-//         max_z: 5.0,
-//     });
-//     commands.spawn(PbrBundle {
-//         mesh: meshes.add(edited_cube),
-//         material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
-//         transform: Transform::from_xyz(0.0, 0.5, 0.0),
-//         ..default()
-//     });
-//     // cube
-//     // commands.spawn(PbrBundle {
-//     //     mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
-//     //     material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
-//     //     transform: Transform::from_xyz(0.0, 0.5, 0.0),
-//     //     ..default()
-//     // });
-//     // light
-//     commands.spawn(PointLightBundle {
-//         point_light: PointLight {
-//             intensity: 1500.0,
-//             shadows_enabled: true,
-//             ..default()
-//         },
-//         transform: Transform::from_xyz(4.0, 8.0, 4.0),
-//         ..default()
-//     });
-//     // camera
-//     spawn_camera(commands)
-// }
+#[derive(Component)]
+struct PanOrbitCamera {
+    /// The "focus point" to orbit around. It is automatically updated when panning the camera
+    pub focus: Vec3,
+    pub radius: f32,
+    pub upside_down: bool,
+}
+
+impl Default for PanOrbitCamera {
+    fn default() -> Self {
+        PanOrbitCamera {
+            focus: Vec3::ZERO,
+            radius: 5.0,
+            upside_down: false,
+        }
+    }
+}
+
+/// Pan the camera with middle mouse click, zoom with scroll wheel, orbit with right mouse click.
+fn pan_orbit_camera(
+    windows: Query<&Window, With<PrimaryWindow>>,
+    mut ev_motion: EventReader<MouseMotion>,
+    mut ev_scroll: EventReader<MouseWheel>,
+    input_mouse: Res<Input<MouseButton>>,
+    mut query: Query<(&mut PanOrbitCamera, &mut Transform, &Projection)>,
+) {
+    // change input mapping for orbit and panning here
+    let orbit_button = MouseButton::Right;
+    let pan_button = MouseButton::Middle;
+
+    let mut pan = Vec2::ZERO;
+    let mut rotation_move = Vec2::ZERO;
+    let mut scroll = 0.0;
+    let mut orbit_button_changed = false;
+
+    if input_mouse.pressed(orbit_button) {
+        for ev in ev_motion.iter() {
+            rotation_move += ev.delta;
+        }
+    } else if input_mouse.pressed(pan_button) {
+        // Pan only if we're not rotating at the moment
+        for ev in ev_motion.iter() {
+            pan += ev.delta;
+        }
+    }
+    for ev in ev_scroll.iter() {
+        scroll += ev.y;
+    }
+    if input_mouse.just_released(orbit_button) || input_mouse.just_pressed(orbit_button) {
+        orbit_button_changed = true;
+    }
+
+    for (mut pan_orbit, mut transform, projection) in query.iter_mut() {
+        if orbit_button_changed {
+            // only check for upside down when orbiting started or ended this frame
+            // if the camera is "upside" down, panning horizontally would be inverted, so invert the input to make it correct
+            let up = transform.rotation * Vec3::Y;
+            pan_orbit.upside_down = up.y <= 0.0;
+        }
+
+        let mut any = false;
+        if rotation_move.length_squared() > 0.0 {
+            any = true;
+            let window = get_primary_window_size(&windows);
+            let delta_x = {
+                let delta = rotation_move.x / window.x * std::f32::consts::PI * 2.0;
+                if pan_orbit.upside_down {
+                    -delta
+                } else {
+                    delta
+                }
+            };
+            let delta_y = rotation_move.y / window.y * std::f32::consts::PI;
+            let yaw = Quat::from_rotation_y(-delta_x);
+            let pitch = Quat::from_rotation_x(-delta_y);
+            transform.rotation = yaw * transform.rotation; // rotate around global y axis
+            transform.rotation = transform.rotation * pitch; // rotate around local x axis
+        } else if pan.length_squared() > 0.0 {
+            any = true;
+            // make panning distance independent of resolution and FOV,
+            let window = get_primary_window_size(&windows);
+            if let Projection::Perspective(projection) = projection {
+                pan *= Vec2::new(projection.fov * projection.aspect_ratio, projection.fov) / window;
+            }
+            // translate by local axes
+            let right = transform.rotation * Vec3::X * -pan.x;
+            let up = transform.rotation * Vec3::Y * pan.y;
+            // make panning proportional to distance away from focus point
+            let translation = (right + up) * pan_orbit.radius;
+            pan_orbit.focus += translation;
+        } else if scroll.abs() > 0.0 {
+            any = true;
+            pan_orbit.radius -= scroll * pan_orbit.radius * 0.2;
+            // dont allow zoom to reach zero or you get stuck
+            pan_orbit.radius = f32::max(pan_orbit.radius, 0.05);
+        }
+
+        if any {
+            // emulating parent/child to make the yaw/y-axis rotation behave like a turntable
+            // parent = x and y rotation
+            // child = z-offset
+            let rot_matrix = Mat3::from_quat(transform.rotation);
+            transform.translation =
+                pan_orbit.focus + rot_matrix.mul_vec3(Vec3::new(0.0, 0.0, pan_orbit.radius));
+        }
+    }
+
+    // consume any remaining events, so they don't pile up if we don't need them
+    // (and also to avoid Bevy warning us about not checking events every frame update)
+    ev_motion.clear();
+}
+
+fn get_primary_window_size(windows: &Query<&Window, With<PrimaryWindow>>) -> Vec2 {
+    let window = windows.get_single().unwrap();
+    let window = Vec2::new(window.width() as f32, window.height() as f32);
+    window
+}
+
+/// Spawn a camera like this
+fn spawn_camera(mut commands: Commands) {
+    let translation = Vec3::new(0.0, 2.5, -5.0);
+    let radius = translation.length();
+
+    commands.spawn((
+        Camera3dBundle {
+            transform: Transform::from_translation(translation).looking_at(Vec3::ZERO, Vec3::Y),
+            ..Default::default()
+        },
+        PanOrbitCamera {
+            radius,
+            ..Default::default()
+        },
+    ));
+}
+
+/// set up a simple 3D scene
+fn setup(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    // plane
+    commands.spawn(PbrBundle {
+        mesh: meshes.add(shape::Plane::from_size(10.0).into()),
+        material: materials.add(Color::rgb(0.3, 0.5, 0.3).into()),
+        transform: Transform::from_xyz(0.0, -1.0, 0.0),
+        ..default()
+    });
+    let edited_cube = Mesh::from(shape::Box {
+        min_x: -1.0,
+        min_y: -0.5,
+        min_z: -1.0,
+        max_x: 1.0,
+        max_y: 0.5,
+        max_z: 1.0,
+    });
+    let arc_mesh = get_arc_mesh(
+        &Arc {
+            a1: 0.5 * PI,
+            a2: 1.5 * PI,
+            circle: Circle {
+                radius: 5.0,
+                center: (0.0, 0.0),
+            },
+        },
+        0.5,
+        3.0,
+        10,
+    );
+    if let VertexAttributeValues::Float32x3(v) =
+        arc_mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap()
+    {
+        for p in v.iter().enumerate() {
+            println!("p {}: ({}, {}, {})", p.0, p.1[0], p.1[1], p.1[2]);
+        }
+    }
+
+    // for idx in arc_mesh.indices().unwrap().iter().enumerate() {
+    //     if idx.0 % 3 == 0 {
+    //         println!("--- next face");
+    //     }
+    //     println!("idx {}", idx.1);
+    // }
+    if let VertexAttributeValues::Float32x3(v) = arc_mesh.attribute(Mesh::ATTRIBUTE_NORMAL).unwrap()
+    {
+        for p in v.iter().enumerate() {
+            println!("n {}: ({}, {}, {})", p.0, p.1[0], p.1[1], p.1[2]);
+        }
+    }
+
+    commands.spawn(PbrBundle {
+        mesh: meshes.add(edited_cube),
+        material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
+        transform: Transform::from_xyz(-10.0, 0.5, 10.0),
+        ..default()
+    });
+    commands.spawn(PbrBundle {
+        mesh: meshes.add(arc_mesh),
+        material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
+        transform: Transform::from_xyz(0.0, 0.0, 0.0),
+        ..default()
+    });
+    // cube
+    // commands.spawn(PbrBundle {
+    //     mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
+    //     material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
+    //     transform: Transform::from_xyz(0.0, 0.5, 0.0),
+    //     ..default()
+    // });
+    // light
+    // commands.spawn(PointLightBundle {
+    //     point_light: PointLight {
+    //         intensity: 1500.0,
+    //         shadows_enabled: true,
+    //         ..default()
+    //     },
+    //     transform: Transform::from_xyz(4.0, 8.0, 4.0),
+    //     ..default()
+    // });
+    commands.spawn(DirectionalLightBundle {
+        directional_light: DirectionalLight {
+            illuminance: 64000.0,
+            shadows_enabled: true,
+            ..default()
+        },
+        transform: Transform::from_xyz(4.0, 100.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
+        ..default()
+    });
+    commands.insert_resource(AmbientLight {
+        color: Color::WHITE,
+        brightness: 1.0,
+    });
+    commands.insert_resource(ClearColor(Color::rgb_u8(135, 206, 235)));
+    commands.spawn(DirectionalLightBundle {
+        directional_light: DirectionalLight {
+            illuminance: 64000.0,
+            shadows_enabled: true,
+            ..default()
+        },
+        transform: Transform::from_xyz(4.0, 100.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
+        ..default()
+    });
+    // camera
+    spawn_camera(commands)
+}
 
 fn main() {
-    let mut graph = CircleMaze {
-        maze: CircleMazeComponent::new(),
-        cell_size: 1.0,
-        center: (0, 0),
-        radius: 25,
-        min_path_width: 1.0,
-        wall_width: 0.1
-    };
+    App::new()
+        .add_plugins(DefaultPlugins)
+        .add_startup_system(setup)
+        .add_system(pan_orbit_camera)
+        .run();
 
-    // let node_count: u32 = 64;
-    let mut starting_comp = CircleMazeComponent::new();
-    starting_comp.add_node((0, 0));
-    // let mut graph: SquareMaze = SquareMaze {
-    //     maze: SquareMazeComponent::new(),
-    //     size: node_count as i64,
-    //     offset: (0, 0)
+    // just to catch compilation errors
+    let _ = App::new().add_startup_system(spawn_camera);
+
+    // let mut graph = CircleMaze {
+    //     maze: CircleMazeComponent::new(),
+    //     cell_size: 1.0,
+    //     center: (0, 0),
+    //     radius: 25,
+    //     min_path_width: 1.0,
+    //     wall_width: 0.1
     // };
 
-    populate_maze(&mut graph, vec![starting_comp]);
+    // let node_count: u32 = 64;
+    // let mut starting_comp = CircleMazeComponent::new();
+    // starting_comp.add_node((0, 0));
+    // // let mut graph: SquareMaze = SquareMaze {
+    // //     maze: SquareMazeComponent::new(),
+    // //     size: node_count as i64,
+    // //     offset: (0, 0)
+    // // };
+    //
+    // populate_maze(&mut graph, vec![starting_comp]);
     // println!("(3, 7) ADJ");
     // for n in graph.adjacent((3, 7)) {
     //     println!("({} {}) <-> ({} {})", 3, 7, n.0, n.1);
@@ -252,35 +329,35 @@ fn main() {
     //
 
     // debug info
-    for e in graph.maze.all_edges() {
-        println!("({} {}) <-> ({} {})", e.0 .0, e.0 .1, e.1 .0, e.1 .1);
-    }
-
-    for r in 1..graph.radius + 2 {
-        if r <= graph.radius {
-            let count = graph.nodes_at_radius(r);
-            for n in 0..(count as i64) {
-                if !graph.maze.contains_edge((r, n), graph.correct_node((r, n+1))) {
-                    println!("NF ({} {}) <-> ({} {})", r, n, r, n+1);
-                }
-                for touching in graph.touching((r, n), 0.0) {
-                    println!("({} {}) touches ({} {})", r, n, touching.0, touching.1);
-                }
-                println!("End touching");
-            }
-        }
-    }
-
-    let mut img: RgbImage = ImageBuffer::from_pixel(1024, 1024, Rgb([255, 255, 255]));
-
-    let font_data: &[u8] = include_bytes!("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf");
-    let font: &Font = &Font::try_from_bytes(font_data).unwrap();
-    let font_scale = Scale { x: 20.0, y: 20.0 };
-
-    let transform = AxisTransform {
-        offset: (img.width() as f64 / 2.0, img.height() as f64 / 2.0),
-        scale: (17.0, -17.0),
-    };
+    // for e in graph.maze.all_edges() {
+    //     println!("({} {}) <-> ({} {})", e.0 .0, e.0 .1, e.1 .0, e.1 .1);
+    // }
+    //
+    // for r in 1..graph.radius + 2 {
+    //     if r <= graph.radius {
+    //         let count = graph.nodes_at_radius(r);
+    //         for n in 0..(count as i64) {
+    //             if !graph.maze.contains_edge((r, n), graph.correct_node((r, n+1))) {
+    //                 println!("NF ({} {}) <-> ({} {})", r, n, r, n+1);
+    //             }
+    //             for touching in graph.touching((r, n), 0.0) {
+    //                 println!("({} {}) touches ({} {})", r, n, touching.0, touching.1);
+    //             }
+    //             println!("End touching");
+    //         }
+    //     }
+    // }
+    //
+    // let mut img: RgbImage = ImageBuffer::from_pixel(1024, 1024, Rgb([255, 255, 255]));
+    //
+    // let font_data: &[u8] = include_bytes!("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf");
+    // let font: &Font = &Font::try_from_bytes(font_data).unwrap();
+    // let font_scale = Scale { x: 20.0, y: 20.0 };
+    //
+    // let transform = AxisTransform {
+    //     offset: (img.width() as f64 / 2.0, img.height() as f64 / 2.0),
+    //     scale: (17.0, -17.0),
+    // };
 
     // for x in 0..img.width() as i64 {
     //     for y in 0..img.height() as i64 {
@@ -383,15 +460,15 @@ fn main() {
     // }
 
     // draw the walls
-    for px in 0..img.width() {
-        for py in 0..img.height() {
-            if graph.is_in_wall(to_canvas_space((px, py), transform)) {
-                img.put_pixel(px, py, Rgb([0, 0, 0]));
-            }
-        }
-    }
-
-    img.save("maze_out.png").unwrap();
+    // for px in 0..img.width() {
+    //     for py in 0..img.height() {
+    //         if graph.is_in_wall(to_canvas_space((px, py), transform)) {
+    //             img.put_pixel(px, py, Rgb([0, 0, 0]));
+    //         }
+    //     }
+    // }
+    //
+    // img.save("maze_out.png").unwrap();
 
     //
     // print!("{}\n", graph.maze.node_count().to_string());
@@ -438,13 +515,4 @@ fn main() {
     // for pixel in img.pixels() {
     //     // Do something with pixel.
     // }
-
-    // App::new()
-    //     .add_plugins(DefaultPlugins)
-    //     .add_startup_system(setup)
-    //     .add_system(pan_orbit_camera)
-    //     .run();
-    //
-    // // just to catch compilation errors
-    // let _ = App::new().add_startup_system(spawn_camera);
 }
