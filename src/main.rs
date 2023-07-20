@@ -8,7 +8,9 @@ use crate::maze_gen::{
     populate_maze, CircleMaze, CircleMazeComponent, CircleNode, Maze, SquareMaze,
     SquareMazeComponent, SquareNode,
 };
-use crate::maze_render::{get_arc_mesh, polar_to_cart, Arc, Circle, GetWall, Segment};
+use crate::maze_render::{
+    get_arc_mesh, get_segment_mesh, polar_to_cart, Arc, Circle, GetWall, Segment,
+};
 use crate::test_render::{
     draw_circle, draw_segment, to_canvas_space, AxisTransform, DrawableCircle, DrawableSegment,
 };
@@ -171,66 +173,38 @@ fn setup(
 ) {
     // plane
     commands.spawn(PbrBundle {
-        mesh: meshes.add(shape::Plane::from_size(10.0).into()),
+        mesh: meshes.add(shape::Plane::from_size(1000.0).into()),
         material: materials.add(Color::rgb(0.3, 0.5, 0.3).into()),
         transform: Transform::from_xyz(0.0, -1.0, 0.0),
         ..default()
     });
-    let edited_cube = Mesh::from(shape::Box {
-        min_x: -1.0,
-        min_y: -0.5,
-        min_z: -1.0,
-        max_x: 1.0,
-        max_y: 0.5,
-        max_z: 1.0,
-    });
-    let arc_mesh = get_arc_mesh(
-        &Arc {
-            a1: 0.5 * PI,
-            a2: 1.5 * PI,
-            circle: Circle {
-                radius: 5.0,
-                center: (0.0, 0.0),
-            },
-        },
-        0.5,
-        3.0,
-        1000,
-    );
 
-    commands.spawn(PbrBundle {
-        mesh: meshes.add(edited_cube),
-        material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
-        transform: Transform::from_xyz(-10.0, 0.5, 10.0),
-        ..default()
-    });
-    commands.spawn(PbrBundle {
-        mesh: meshes.add(arc_mesh),
-        material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
-        transform: Transform::from_xyz(0.0, 0.0, 0.0),
-        ..default()
-    });
-    // cube
-    // commands.spawn(PbrBundle {
-    //     mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
-    //     material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
-    //     transform: Transform::from_xyz(0.0, 0.5, 0.0),
-    //     ..default()
-    // });
-    // light
-    // commands.spawn(PointLightBundle {
-    //     point_light: PointLight {
-    //         intensity: 1500.0,
-    //         shadows_enabled: true,
-    //         ..default()
-    //     },
-    //     transform: Transform::from_xyz(4.0, 8.0, 4.0),
-    //     ..default()
-    // });
+    let mut graph = CircleMaze {
+        maze: CircleMazeComponent::new(),
+        cell_size: 1.0,
+        center: (0, 0),
+        radius: 13,
+        min_path_width: 1.0,
+        wall_width: 0.1
+    };
+    let mut starting_comp = CircleMazeComponent::new();
+    starting_comp.add_node((0, 0));
+    populate_maze(&mut graph, vec![starting_comp]);
+
+    for mesh in graph.get_wall_geometry(0.1, 0.4) {
+        commands.spawn(PbrBundle {
+            mesh: meshes.add(mesh),
+            material: materials.add(Color::rgb(0.01, 0.8, 0.2).into()),
+            transform: Transform::from_xyz(0.0, 0.0, 0.0),
+            ..default()
+        });
+    }
+
+
     commands.spawn(DirectionalLightBundle {
         directional_light: DirectionalLight {
             illuminance: 64000.0,
-            shadows_enabled: true,
+            shadows_enabled: false,
             ..default()
         },
         transform: Transform::from_xyz(75.0, 100.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
@@ -254,236 +228,4 @@ fn main() {
 
     // just to catch compilation errors
     let _ = App::new().add_startup_system(spawn_camera);
-
-    // let mut graph = CircleMaze {
-    //     maze: CircleMazeComponent::new(),
-    //     cell_size: 1.0,
-    //     center: (0, 0),
-    //     radius: 25,
-    //     min_path_width: 1.0,
-    //     wall_width: 0.1
-    // };
-
-    // let node_count: u32 = 64;
-    // let mut starting_comp = CircleMazeComponent::new();
-    // starting_comp.add_node((0, 0));
-    // // let mut graph: SquareMaze = SquareMaze {
-    // //     maze: SquareMazeComponent::new(),
-    // //     size: node_count as i64,
-    // //     offset: (0, 0)
-    // // };
-    //
-    // populate_maze(&mut graph, vec![starting_comp]);
-    // println!("(3, 7) ADJ");
-    // for n in graph.adjacent((3, 7)) {
-    //     println!("({} {}) <-> ({} {})", 3, 7, n.0, n.1);
-    // }
-    // println!("END (3, 7) ADJ");
-    //
-    // println!("(2, 9) ADJ");
-    // for n in graph.adjacent((2, 9)) {
-    //     println!("({} {}) <-> ({} {})", 2, 9, n.0, n.1);
-    // }
-    // println!("END (2, 9) ADJ");
-    //
-    // println!("(2, 5) ADJ");
-    // for n in graph.adjacent((2, 5)) {
-    //     println!("({} {}) <-> ({} {})", 2, 5, n.0, n.1);
-    // }
-    // println!("END (2, 5) ADJ");
-    //
-    // println!("(3, 13) ADJ");
-    // for n in graph.adjacent((3, 13)) {
-    //     println!("({} {}) <-> ({} {})", 3, 13, n.0, n.1);
-    // }
-    // println!("END (3, 13) ADJ");
-    //
-
-    // debug info
-    // for e in graph.maze.all_edges() {
-    //     println!("({} {}) <-> ({} {})", e.0 .0, e.0 .1, e.1 .0, e.1 .1);
-    // }
-    //
-    // for r in 1..graph.radius + 2 {
-    //     if r <= graph.radius {
-    //         let count = graph.nodes_at_radius(r);
-    //         for n in 0..(count as i64) {
-    //             if !graph.maze.contains_edge((r, n), graph.correct_node((r, n+1))) {
-    //                 println!("NF ({} {}) <-> ({} {})", r, n, r, n+1);
-    //             }
-    //             for touching in graph.touching((r, n), 0.0) {
-    //                 println!("({} {}) touches ({} {})", r, n, touching.0, touching.1);
-    //             }
-    //             println!("End touching");
-    //         }
-    //     }
-    // }
-    //
-    // let mut img: RgbImage = ImageBuffer::from_pixel(1024, 1024, Rgb([255, 255, 255]));
-    //
-    // let font_data: &[u8] = include_bytes!("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf");
-    // let font: &Font = &Font::try_from_bytes(font_data).unwrap();
-    // let font_scale = Scale { x: 20.0, y: 20.0 };
-    //
-    // let transform = AxisTransform {
-    //     offset: (img.width() as f64 / 2.0, img.height() as f64 / 2.0),
-    //     scale: (17.0, -17.0),
-    // };
-
-    // for x in 0..img.width() as i64 {
-    //     for y in 0..img.height() as i64 {
-    //
-    //
-    //         let chan_center = ((x * 2) as u32, (y * 2) as u32);
-    //         img.put_pixel(chan_center.0, chan_center.1, image::Rgb([255, 255, 255]));
-    //         if graph.maze.contains_edge((x, y), (x+1, y)) {
-    //             img.put_pixel(chan_center.0 + 1, chan_center.1, image::Rgb([255, 255, 255]));
-    //         }
-    //         if graph.maze.contains_edge((x, y), (x, y+1)) {
-    //             img.put_pixel(chan_center.0, chan_center.1 + 1, image::Rgb([255, 255, 255]));
-    //         }
-    //     }
-    // }
-
-    // draw the grid
-    // for r in 1..graph.radius + 2 {
-    //     let circle = DrawableCircle {
-    //         circle: Circle {
-    //             center: (0.0, 0.0),
-    //             radius: r as f64 * graph.cell_size,
-    //         },
-    //         line_width: 0.01,
-    //         color: Rgb([0, 0, 255]),
-    //     };
-    //     draw_circle(&mut img, circle, transform);
-    //     if r <= graph.radius {
-    //         let count = graph.nodes_at_radius(r);
-    //         println!("{} {}", r, count);
-    //         for n in 0..count {
-    //             let angle = (n as f64) / (count as f64) * 2.0 * PI;
-    //             let p1 = polar_to_cart((r as f64 * graph.cell_size, angle));
-    //             let p2 = polar_to_cart((r as f64 * graph.cell_size + graph.cell_size, angle));
-    //             let segment = DrawableSegment {
-    //                 segment: Segment { p1, p2 },
-    //                 line_width: 0.01,
-    //                 color: Rgb([0, 0, 255]),
-    //             };
-    //             draw_segment(&mut img, segment, transform);
-    //         }
-    //     }
-    // }
-
-    // let mut rng = thread_rng();
-    // println!("Done drawing grid, draw edges");
-    // for e in graph.maze.all_edges() {
-    //     let c1 = graph.nodes_at_radius(e.0 .0);
-    //     let p1 = polar_to_cart((
-    //         (e.0 .0 as f64 + 0.5) * graph.cell_size,
-    //         (e.0 .1 as f64 + 0.5) / (c1 as f64) * 2.0 * PI,
-    //     ));
-    //
-    //     let c2 = graph.nodes_at_radius(e.1 .0);
-    //     let p2 = polar_to_cart((
-    //         (e.1 .0 as f64 + 0.5) * graph.cell_size,
-    //         (e.1 .1 as f64 + 0.5) / (c2 as f64) * 2.0 * PI,
-    //     ));
-    //
-    //     let segment = DrawableSegment {
-    //         segment: Segment { p1, p2 },
-    //         line_width: 0.8,
-    //         color: Rgb([
-    //             // rng.next_u32() as u8,
-    //             // rng.next_u32() as u8,
-    //             // rng.next_u32() as u8,
-    //             255, 255, 255,
-    //         ]),
-    //     };
-    //     draw_segment(&mut img, segment, transform);
-    // }
-
-    // draw sector labels
-    // for r in 1..graph.radius + 2 {
-    //     if r <= graph.radius {
-    //         let count = graph.nodes_at_radius(r);
-    //         println!("{} {}", r, count);
-    //         for n in 0..count {
-    //             let p = polar_to_cart((
-    //                 (r as f64 + 0.5) * graph.cell_size,
-    //                 (n as f64 + 0.5) / (graph.nodes_at_radius(r) as f64) * 2.0 * PI,
-    //             ));
-    //
-    //             let tx = (p.0 * transform.scale.0) + transform.offset.0;
-    //             let ty = (p.1 * transform.scale.1) + transform.offset.1;
-    //
-    //             draw_text_mut(
-    //                 &mut img,
-    //                 Rgb([255, 0, 0]),
-    //                 tx.round() as i32,
-    //                 ty.round() as i32,
-    //                 font_scale,
-    //                 font,
-    //                 &*format!("({}, {})", r, n),
-    //             );
-    //             // println!("{}, {}", tx.round() as i32,
-    //             //          ty.round() as i32,);
-    //         }
-    //     }
-    // }
-
-    // draw the walls
-    // for px in 0..img.width() {
-    //     for py in 0..img.height() {
-    //         if graph.is_in_wall(to_canvas_space((px, py), transform)) {
-    //             img.put_pixel(px, py, Rgb([0, 0, 0]));
-    //         }
-    //     }
-    // }
-    //
-    // img.save("maze_out.png").unwrap();
-
-    //
-    // print!("{}\n", graph.maze.node_count().to_string());
-    // print!("{}", graph.maze.edge_count().to_string());
-    //
-    // let mut img: RgbImage = ImageBuffer::new(node_count * 2, node_count * 2);
-    //
-    // for x in 0..node_count as i64 {
-    //     for y in 0..node_count as i64 {
-    //         let chan_center = ((x * 2) as u32, (y * 2) as u32);
-    //         img.put_pixel(chan_center.0, chan_center.1, image::Rgb([255, 255, 255]));
-    //         if graph.maze.contains_edge((x, y), (x+1, y)) {
-    //             img.put_pixel(chan_center.0 + 1, chan_center.1, image::Rgb([255, 255, 255]));
-    //         }
-    //         if graph.maze.contains_edge((x, y), (x, y+1)) {
-    //             img.put_pixel(chan_center.0, chan_center.1 + 1, image::Rgb([255, 255, 255]));
-    //         }
-    //     }
-    // }
-    //
-    // img.save("maze_out.png").unwrap();
-    // // Construct a new by repeated calls to the supplied closure.
-    // let mut img = ImageBuffer::from_fn(512, 512, |x, y| {
-    //     if x % 2 == 0 {
-    //         image::Luma([0u8])
-    //     } else {
-    //         image::Luma([255u8])
-    //     }
-    // });
-
-    // // Obtain the image's width and height.
-    // let (width, height) = img.dimensions();
-    //
-    // // Access the pixel at coordinate (100, 100).
-    // let pixel = img[(100, 100)];
-    //
-    // // Or use the `get_pixel` method from the `GenericImage` trait.
-    // let pixel = *img.get_pixel(100, 100);
-    //
-    // // Put a pixel at coordinate (100, 100).
-    // img.put_pixel(100, 100, pixel);
-    //
-    // // Iterate over all pixels in the image.
-    // for pixel in img.pixels() {
-    //     // Do something with pixel.
-    // }
 }

@@ -27,7 +27,7 @@ pub struct Arc {
 
 pub trait GetWall<N: NodeTrait> {
     /// Gets the wall
-    fn get_wall_geometry(&self, height: f64) -> Mesh;
+    fn get_wall_geometry(&self, width: f32, height: f32) -> Vec<Mesh>;
 
     /// Determine if a point is in a wall
     fn is_in_wall(&self, p: (f64, f64)) -> bool;
@@ -80,6 +80,18 @@ pub fn distance_to_segment(segment: &Segment, p: (f64, f64)) -> f64 {
     return (seg_p.0 * seg_p.0 + seg_p.1 * seg_p.1).sqrt();
 }
 
+// get the indices of the face in clockwise order
+fn cw_indices(cur_idx_set: u32) -> Vec<u32> {
+    let i = cur_idx_set * 4;
+    return vec![i, i + 1, i + 2, i + 3, i + 2, i + 1];
+}
+
+// get the indices of the face in counterclockwise order
+fn cc_indices(cur_idx_set: u32) -> Vec<u32> {
+    let i = cur_idx_set * 4;
+    return vec![i + 2, i + 1, i, i + 1, i + 2, i + 3];
+}
+
 /// Get the mesh of a segment. The corners are listed clockwise.
 pub fn get_segment_mesh(segment: &Segment, width: f32, height: f32) -> Mesh {
     // get the vector perpendicular to <p2-p1>
@@ -87,7 +99,7 @@ pub fn get_segment_mesh(segment: &Segment, width: f32, height: f32) -> Mesh {
     let vp2 = Vec2::from((segment.p2.0 as f32, segment.p2.1 as f32));
     let vp = vp2 - vp1;
     // clockwise normal
-    let normal = Vec2::from((vp.y, -vp.x)).normalize() * width;
+    let normal = Vec2::from((vp.y, -vp.x)).normalize();
     let n_norm = -normal;
 
     let vp_unit = vp.normalize();
@@ -98,68 +110,92 @@ pub fn get_segment_mesh(segment: &Segment, width: f32, height: f32) -> Mesh {
 
     let v = vec![
         // bottom
-        [(normal + vp1).x, 0.0, (normal + vp1).y],
-        [(n_norm + vp1).x, 0.0, (n_norm + vp1).y],
-        [(normal + vp2).x, 0.0, (normal + vp2).y],
-        [(n_norm + vp2).x, 0.0, (n_norm + vp2).y],
+        [(n_norm * width + vp1).x, 0.0, (n_norm * width + vp1).y],
+        [(normal * width + vp1).x, 0.0, (normal * width + vp1).y],
+        [(n_norm * width + vp2).x, 0.0, (n_norm * width + vp2).y],
+        [(normal * width + vp2).x, 0.0, (normal * width + vp2).y],
         // top
-        [(normal + vp1).x, height, (normal + vp1).y],
-        [(n_norm + vp1).x, height, (n_norm + vp1).y],
-        [(normal + vp2).x, height, (normal + vp2).y],
-        [(n_norm + vp2).x, height, (n_norm + vp2).y],
+        [(n_norm * width + vp1).x, height, (n_norm * width + vp1).y],
+        [(normal * width + vp1).x, height, (normal * width + vp1).y],
+        [(n_norm * width + vp2).x, height, (n_norm * width + vp2).y],
+        [(normal * width + vp2).x, height, (normal * width + vp2).y],
     ];
 
-    let complete_vertices = &[
-        // Front
-        (v[1], n_face_norm, [0., 0.]),
-        (v[3], n_face_norm, [1.0, 0.]),
-        (v[5], n_face_norm, [1.0, 1.0]),
-        (v[7], n_face_norm, [0., 1.0]),
-        // Back
-        (v[0], face_norm, [1.0, 0.]),
-        (v[2], face_norm, [0., 0.]),
-        (v[4], face_norm, [0., 1.0]),
-        (v[6], face_norm, [1.0, 1.0]),
-        // Right
-        (v[2], face_vp_unit, [0., 0.]),
-        (v[3], face_vp_unit, [1.0, 0.]),
-        (v[6], face_vp_unit, [1.0, 1.0]),
-        (v[7], face_vp_unit, [0., 1.0]),
-        // Left
-        (v[0], n_face_vp_unit, [1.0, 0.]),
-        (v[1], n_face_vp_unit, [0., 0.]),
-        (v[4], n_face_vp_unit, [0., 1.0]),
-        (v[5], n_face_vp_unit, [1.0, 1.0]),
-        // Top
-        (v[4], [0., 1.0, 0.], [1.0, 0.]),
-        (v[6], [0., 1.0, 0.], [0., 0.]),
-        (v[5], [0., 1.0, 0.], [0., 1.0]),
-        (v[7], [0., 1.0, 0.], [1.0, 1.0]),
-        // Bottom
+    // the vertices with their normals and UV
+    let mut vertices: Vec<([f32; 3], [f32; 3], [f32; 2])> = vec![];
+    // the index positions; we update this every time we add a new quad
+    let mut indices: Vec<u32> = vec![];
+    let mut cur_idx_set = 0u32;
+
+    // bottom
+    vertices.append(&mut vec![
         (v[0], [0., -1.0, 0.], [0., 0.]),
         (v[1], [0., -1.0, 0.], [1.0, 0.]),
         (v[2], [0., -1.0, 0.], [1.0, 1.0]),
         (v[3], [0., -1.0, 0.], [0., 1.0]),
-    ];
-
-    let positions: Vec<_> = complete_vertices.iter().map(|(p, _, _)| *p).collect();
-    let normals: Vec<_> = complete_vertices.iter().map(|(_, n, _)| *n).collect();
-    let uvs: Vec<_> = complete_vertices.iter().map(|(_, _, uv)| *uv).collect();
-
-    let indices = Indices::U32(vec![
-        0, 1, 2, 2, 3, 0, // front
-        4, 5, 6, 6, 7, 4, // back
-        8, 9, 10, 10, 11, 8, // right
-        12, 13, 14, 14, 15, 12, // left
-        16, 17, 18, 18, 19, 16, // top
-        20, 21, 22, 22, 23, 20, // bottom
     ]);
+    indices.append(&mut cw_indices(cur_idx_set));
+    cur_idx_set += 1;
+
+    // top
+    vertices.append(&mut vec![
+        (v[4], [0., 1.0, 0.], [1.0, 0.]),
+        (v[5], [0., 1.0, 0.], [0., 0.]),
+        (v[6], [0., 1.0, 0.], [0., 1.0]),
+        (v[7], [0., 1.0, 0.], [1.0, 1.0]),
+    ]);
+    indices.append(&mut cc_indices(cur_idx_set));
+    cur_idx_set += 1;
+
+    // front
+    vertices.append(&mut vec![
+        (v[0], n_face_norm, [0., 0.]),
+        (v[4], n_face_norm, [1.0, 0.]),
+        (v[2], n_face_norm, [1.0, 1.0]),
+        (v[6], n_face_norm, [0., 1.0]),
+    ]);
+    indices.append(&mut cc_indices(cur_idx_set));
+    cur_idx_set += 1;
+
+    // back
+    vertices.append(&mut vec![
+        (v[1], face_norm, [1.0, 0.]),
+        (v[5], face_norm, [0., 0.]),
+        (v[3], face_norm, [0., 1.0]),
+        (v[7], face_norm, [1.0, 1.0]),
+    ]);
+    indices.append(&mut cw_indices(cur_idx_set));
+    cur_idx_set += 1;
+
+    // left
+    vertices.append(&mut vec![
+        (v[0], n_face_vp_unit, [1.0, 0.]),
+        (v[1], n_face_vp_unit, [0., 0.]),
+        (v[4], n_face_vp_unit, [0., 1.0]),
+        (v[5], n_face_vp_unit, [1.0, 1.0]),
+    ]);
+    indices.append(&mut cc_indices(cur_idx_set));
+    cur_idx_set += 1;
+
+    // right
+    vertices.append(&mut vec![
+        (v[2], face_vp_unit, [0., 0.]),
+        (v[3], face_vp_unit, [1.0, 0.]),
+        (v[6], face_vp_unit, [1.0, 1.0]),
+        (v[7], face_vp_unit, [0., 1.0]),
+    ]);
+    indices.append(&mut cw_indices(cur_idx_set));
+    cur_idx_set += 1;
+
+    let positions: Vec<_> = vertices.iter().map(|(p, _, _)| *p).collect();
+    let normals: Vec<_> = vertices.iter().map(|(_, n, _)| *n).collect();
+    let uvs: Vec<_> = vertices.iter().map(|(_, _, uv)| *uv).collect();
 
     let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-    mesh.set_indices(Some(indices));
+    mesh.set_indices(Some(Indices::U32(indices)));
     return mesh;
 }
 
@@ -246,18 +282,6 @@ pub fn get_arc_mesh(arc: &Arc, width: f32, height: f32, divisions: u32) -> Mesh 
     // the index positions; we update this every time we add a new quad
     let mut indices: Vec<u32> = vec![];
     let mut cur_idx_set = 0u32;
-
-    // get the indices of the face in clockwise order
-    let mut cw_indices = |cur_idx_set: u32| {
-        let i = cur_idx_set * 4;
-        return vec![i, i + 1, i + 2, i + 3, i + 2, i + 1];
-    };
-
-    // get the indices of the face in counterclockwise order
-    let mut cc_indices = |cur_idx_set: u32| {
-        let i = cur_idx_set * 4;
-        return vec![i + 2, i + 1, i, i + 1, i + 2, i + 3];
-    };
 
     // create the bottom
     let b_norm = [0.0f32, -1.0, 0.0];
@@ -401,9 +425,80 @@ impl CircleMaze {
     }
 }
 
+impl CircleMaze {
+    fn get_node_meshes(&self, node: CircleNode, width: f32, height: f32) -> Vec<Mesh> {
+        let mut meshes: Vec<Mesh> = vec![];
+
+        for touching in self.touching(node, 0.0) {
+            if touching.0 == node.0 && touching.1 > node.1 {
+                let mut clockwise_wall_node = touching;
+                if touching.1 < node.1 {
+                    // if the point's closest node is farther along the circle,
+                    // then we are using the clockwise wall
+                    // default is to use the counterclockwise wall
+                    clockwise_wall_node = node;
+                }
+                let node_pol_point = self.get_node_pol_point(clockwise_wall_node);
+                if !self
+                    .maze
+                    .contains_edge(self.correct_node(node), self.correct_node(touching))
+                {
+                    meshes.push(get_segment_mesh(
+                        &Segment {
+                            p1: polar_to_cart(node_pol_point),
+                            p2: polar_to_cart((
+                                node_pol_point.0 + self.cell_size,
+                                node_pol_point.1,
+                            )),
+                        },
+                        width,
+                        height,
+                    ));
+                }
+            } else if touching.0 > node.0 {
+                let (npp_radius, npp_theta) = self.get_node_pol_point(node);
+                let (_, npp_theta_plus_1) = self.get_node_pol_point((node.0, node.1 + 1));
+                let (tpp_radius, tpp_theta) = self.get_node_pol_point(touching);
+                let (_, tpp_theta_plus_1) = self.get_node_pol_point((touching.0, touching.1 + 1));
+
+                let mut thetas = vec![npp_theta, npp_theta_plus_1, tpp_theta, tpp_theta_plus_1];
+
+                //pro gamer avoid dividing my zero
+                thetas.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+                if !self
+                    .maze
+                    .contains_edge(self.correct_node(node), self.correct_node(touching))
+                {
+                    meshes.push(get_arc_mesh(
+                        &Arc {
+                            circle: Circle {
+                                center: (0.0, 0.0),
+                                radius: npp_radius.max(tpp_radius),
+                            },
+                            a1: thetas[1],
+                            a2: thetas[2],
+                        },
+                        width,
+                        height,
+                        3,
+                    ));
+                }
+            }
+        }
+        return meshes;
+    }
+}
+
 impl GetWall<CircleNode> for CircleMaze {
-    fn get_wall_geometry(&self, height: f64) -> Mesh {
-        todo!()
+    fn get_wall_geometry(&self, width: f32, height: f32) -> Vec<Mesh> {
+        let mut meshes: Vec<Mesh> = vec![];
+        for r in 0..self.radius + 1 {
+            for n in 0..self.nodes_at_radius(r) {
+                meshes.append(&mut self.get_node_meshes((r, n as i64), width, height));
+            }
+        }
+        return meshes;
     }
 
     fn is_in_wall(&self, p: (f64, f64)) -> bool {
