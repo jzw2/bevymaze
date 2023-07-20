@@ -194,7 +194,11 @@ fn setup(
     for mesh in graph.get_wall_geometry(0.1, 0.4) {
         commands.spawn(PbrBundle {
             mesh: meshes.add(mesh),
-            material: materials.add(Color::rgb(0.01, 0.8, 0.2).into()),
+            material: materials.add(StandardMaterial {
+                base_color: Color::rgba(0.01, 0.8, 0.2, 0.95).into(),
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            }),
             transform: Transform::from_xyz(0.0, 0.0, 0.0),
             ..default()
         });
