@@ -11,6 +11,9 @@ use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::ptr::null;
 
+pub const SQUARE_MAZE_CELL_SIZE: f64 = 1.0f64;
+pub const SQUARE_MAZE_WALL_WIDTH: f64 = 0.05f64;
+
 /// a node representing the x/y coordinates of the maze intersection
 pub type SquareNode = (i64, i64);
 /// a node representing the "(r,theta)" coordinates of the maze
@@ -32,8 +35,14 @@ pub trait Maze<N: NodeTrait> {
 /// Represent a square grid maze
 pub struct SquareMaze {
     pub(crate) maze: SquareMazeComponent,
+    /// the amount of cells on one side
     pub(crate) size: i64,
+    /// the offset of nodes
     pub(crate) offset: (i64, i64),
+    /// the width and height of each square
+    pub(crate) cell_size: f64,
+    /// the width of the walls
+    pub(crate) wall_width: f64,
 }
 
 impl Maze<SquareNode> for SquareMaze {
@@ -89,7 +98,7 @@ pub struct CircleMaze {
     pub(crate) min_path_width: f64,
 
     /// the wall width, used when rendering the wall
-    pub(crate) wall_width: f64
+    pub(crate) wall_width: f64,
 }
 
 impl CircleMaze {
@@ -275,7 +284,9 @@ impl Maze<CircleNode> for CircleMaze {
 
     /// center is (r, n)
     fn adjacent(&self, center: CircleNode) -> Vec<CircleNode> {
-        return self.touching(center, self.min_path_width).iter()
+        return self
+            .touching(center, self.min_path_width)
+            .iter()
             .filter_map(|n| {
                 return if n.0 <= self.radius {
                     Some(self.correct_node(*n))
@@ -305,13 +316,16 @@ fn next_i64_tuple(file: &mut File, mut buf: [u8; 8]) -> (i64, i64) {
 }
 
 impl SquareMaze {
-    fn save(&self) {
+    pub fn save(&self) {
         self.save_named(SquareMaze::file_name(self.offset).as_str());
     }
 
     fn save_named(&self, fname: &str) {
         let file_res = OpenOptions::new()
-            .append(true) // Open in append mode
+            .create(true)
+            .write(true)
+            .truncate(true)
+            // .append(true) // Open in append mode
             .open(fname);
         let mut file = file_res.unwrap();
         file.write(&self.size.to_be_bytes());
@@ -327,16 +341,23 @@ impl SquareMaze {
                     file.write(&n2.0.to_be_bytes());
                     file.write(&n2.1.to_be_bytes());
                 }
+                let n2 = (x, y + 1);
+                if self.maze.contains_edge(n1, n2) {
+                    file.write(&n1.0.to_be_bytes());
+                    file.write(&n1.1.to_be_bytes());
+                    file.write(&n2.0.to_be_bytes());
+                    file.write(&n2.1.to_be_bytes());
+                }
             }
         }
         file.flush();
     }
 
     fn file_name(offset: (i64, i64)) -> String {
-        return offset.0.to_string() + "," + &*offset.1.to_string() + ".mzb";
+        return offset.0.to_string() + "_" + &*offset.1.to_string() + ".mzb";
     }
 
-    fn load(offset: (i64, i64)) -> Self {
+    pub fn load(offset: (i64, i64)) -> Self {
         return SquareMaze::load_named(SquareMaze::file_name(offset).as_str());
     }
 
@@ -345,6 +366,8 @@ impl SquareMaze {
             maze: UnGraphMap::new(),
             size: 0,
             offset: (0, 0),
+            cell_size: SQUARE_MAZE_CELL_SIZE,
+            wall_width: SQUARE_MAZE_WALL_WIDTH,
         };
         let file_res = File::open(fname);
         let mut file = file_res.unwrap();

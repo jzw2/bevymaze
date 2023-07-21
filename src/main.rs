@@ -4,10 +4,7 @@ mod maze_gen;
 mod maze_render;
 mod test_render;
 
-use crate::maze_gen::{
-    populate_maze, CircleMaze, CircleMazeComponent, CircleNode, Maze, SquareMaze,
-    SquareMazeComponent, SquareNode,
-};
+use crate::maze_gen::{populate_maze, CircleMaze, CircleMazeComponent, CircleNode, Maze, SquareMaze, SquareMazeComponent, SquareNode, SQUARE_MAZE_CELL_SIZE, SQUARE_MAZE_WALL_WIDTH};
 use crate::maze_render::{
     get_arc_mesh, get_segment_mesh, polar_to_cart, Arc, Circle, GetWall, Segment,
 };
@@ -179,31 +176,41 @@ fn setup(
         ..default()
     });
 
-    let mut graph = CircleMaze {
-        maze: CircleMazeComponent::new(),
-        cell_size: 1.0,
-        center: (0, 0),
-        radius: 13,
-        min_path_width: 1.0,
-        wall_width: 0.1
+    // let mut graph = CircleMaze {
+    //     maze: CircleMazeComponent::new(),
+    //     cell_size: 1.0,
+    //     center: (0, 0),
+    //     radius: 13,
+    //     min_path_width: 1.0,
+    //     wall_width: 0.1
+    // };
+    // let mut starting_comp = CircleMazeComponent::new();
+    let mut graph = SquareMaze {
+        maze: SquareMazeComponent::new(),
+        cell_size: SQUARE_MAZE_CELL_SIZE,
+        offset: (0, 0),
+        size: 32,
+        wall_width: SQUARE_MAZE_WALL_WIDTH,
     };
-    let mut starting_comp = CircleMazeComponent::new();
-    starting_comp.add_node((0, 0));
+    let mut starting_comp = SquareMazeComponent::new();
+    starting_comp.add_node((-1, 0));
     populate_maze(&mut graph, vec![starting_comp]);
+
+    graph.save();
+    let graph = SquareMaze::load(graph.offset);
 
     for mesh in graph.get_wall_geometry(0.1, 0.4) {
         commands.spawn(PbrBundle {
             mesh: meshes.add(mesh),
             material: materials.add(StandardMaterial {
-                base_color: Color::rgba(0.01, 0.8, 0.2, 0.95).into(),
-                alpha_mode: AlphaMode::Blend,
+                base_color: Color::rgba(0.01, 0.8, 0.2, 1.0).into(),
+                alpha_mode: AlphaMode::Multiply,
                 ..default()
             }),
             transform: Transform::from_xyz(0.0, 0.0, 0.0),
             ..default()
         });
     }
-
 
     commands.spawn(DirectionalLightBundle {
         directional_light: DirectionalLight {

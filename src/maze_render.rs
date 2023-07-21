@@ -1,4 +1,4 @@
-use crate::maze_gen::{CircleMaze, CircleNode};
+use crate::maze_gen::{CircleMaze, CircleNode, SquareMaze, SquareNode};
 use bevy::math::{Vec2, Vec3};
 use bevy::prelude::{shape, Mesh};
 use bevy::render::mesh::{Indices, PrimitiveTopology};
@@ -487,6 +487,37 @@ impl CircleMaze {
             }
         }
         return meshes;
+    }
+}
+
+impl GetWall<SquareNode> for SquareMaze {
+    fn get_wall_geometry(&self, width: f32, height: f32) -> Vec<Mesh> {
+        let mut meshes: Vec<Mesh> = vec![];
+        for x in 0..self.size {
+            for y in 0..self.size {
+                let cur = (x + self.offset.0, y + self.offset.1);
+                let corner = (x + self.offset.0 + 1, y + self.offset.1 + 1);
+                let adjacent = (x + self.offset.0 + 1, y + self.offset.1);
+                if !self.maze.contains_edge(cur, adjacent) {
+                    meshes.push(get_segment_mesh(&Segment {
+                        p1: (adjacent.0 as f64, adjacent.1 as f64),
+                        p2: (corner.0 as f64, corner.1 as f64)
+                    }, width, height));
+                }
+                let adjacent = (x + self.offset.0, y + self.offset.1 + 1);
+                if !self.maze.contains_edge(cur, adjacent) {
+                    meshes.push(get_segment_mesh(&Segment {
+                        p1: (adjacent.0 as f64, adjacent.1 as f64),
+                        p2: (corner.0 as f64, corner.1 as f64)
+                    }, width, height));
+                }
+            }
+        }
+        return meshes;
+    }
+
+    fn is_in_wall(&self, p: (f64, f64)) -> bool {
+        todo!()
     }
 }
 
