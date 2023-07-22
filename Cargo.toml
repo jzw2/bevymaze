@@ -12,3 +12,4 @@ imageproc = "0.23.0"
 petgraph = "0.6.3"
 rand = "0.8.5"
 rusttype = "0.9.3"
+bevy_terrain = { path = "bevy_terrain" }

@@ -4,7 +4,10 @@ mod maze_gen;
 mod maze_render;
 mod test_render;
 
-use crate::maze_gen::{populate_maze, CircleMaze, CircleMazeComponent, CircleNode, Maze, SquareMaze, SquareMazeComponent, SquareNode, SQUARE_MAZE_CELL_SIZE, SQUARE_MAZE_WALL_WIDTH};
+use crate::maze_gen::{
+    populate_maze, CircleMaze, CircleMazeComponent, CircleNode, Maze, SquareMaze,
+    SquareMazeComponent, SquareNode, SQUARE_MAZE_CELL_SIZE, SQUARE_MAZE_WALL_WIDTH,
+};
 use crate::maze_render::{
     get_arc_mesh, get_segment_mesh, polar_to_cart, Arc, Circle, GetWall, Segment,
 };
