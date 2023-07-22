@@ -20,6 +20,9 @@ use bevy::math::Vec3;
 use bevy::prelude::*;
 use bevy::render::camera::Projection;
 use bevy::render::mesh::VertexAttributeValues;
+use bevy::render::render_resource::{AddressMode, SamplerDescriptor};
+use bevy::render::texture::ImageSampler::Descriptor;
+use bevy::render::texture::{CompressedImageFormats, ImageSampler, ImageType};
 use bevy::window::PrimaryWindow;
 use image::io::Reader as ImageReader;
 use image::{ImageBuffer, Rgb, RgbImage};
@@ -125,7 +128,7 @@ fn pan_orbit_camera(
             pan_orbit.focus += translation;
         } else if scroll.abs() > 0.0 {
             any = true;
-            pan_orbit.radius -= scroll  * 0.2;
+            pan_orbit.radius -= scroll * 0.2;
             // dont allow zoom to reach zero or you get stuck
             //pan_orbit.radius = f32::max(pan_orbit.radius, 0.05);
         }
@@ -207,8 +210,8 @@ fn setup(
     let graph = SquareMaze::load(graph.offset);
 
     //leaf texture
-    let texture_handle = asset_server.load("green.png");
-
+    // let texture_handle = load_tiled_texture(&mut images, "hedge.png");
+    let texture_handle = asset_server.load("hedge.png");
 
     for mesh in graph.get_wall_geometry(0.1, 0.4) {
         commands.spawn(PbrBundle {
@@ -216,7 +219,7 @@ fn setup(
             material: materials.add(StandardMaterial {
                 // base_color: Color::rgba(0.01, 0.8, 0.2, 1.0).into(),
                 base_color_texture: Some(texture_handle.clone()),
-                alpha_mode: AlphaMode::Multiply,
+                alpha_mode: AlphaMode::Mask(0.5),
                 ..default()
             }),
             transform: Transform::from_xyz(0.0, 0.0, 0.0),
@@ -242,11 +245,66 @@ fn setup(
     spawn_camera(commands)
 }
 
+pub fn load_tiled_texture(images: &mut Assets<Image>, texture_path: &str) -> Handle<Image> {
+    let ext = std::path::Path::new(texture_path)
+        .extension()
+        .unwrap()
+        .to_str()
+        .unwrap();
+    let img_bytes = std::fs::read(texture_path).unwrap();
+    let mut image = Image::from_buffer(
+        &img_bytes,
+        ImageType::Extension(ext),
+        CompressedImageFormats::all(),
+        true,
+    )
+    .unwrap();
+    image.sampler_descriptor = ImageSampler::Descriptor(SamplerDescriptor {
+        address_mode_u: AddressMode::Repeat,
+        address_mode_v: AddressMode::Repeat,
+        ..Default::default()
+    });
+    images.add(image)
+}
+
+// fn set_texture_tiled(
+//     mut texture_events: EventReader<AssetEvent<Image>>,
+//     mut textures: ResMut<Assets<Image>>,
+// ) {
+//     for event in texture_events.iter() {
+//         match event {
+//             AssetEvent::Created { handle } => {
+//                 if let Some(texture) = textures.get_mut(handle) {
+//                     texture.sampler_descriptor = Descriptor(SamplerDescriptor {
+//                         address_mode_u: AddressMode::Repeat,
+//                         address_mode_v: AddressMode::Repeat,
+//                         ..default()
+//                     });
+//                     // if let Descriptor(ref mut sd) = &texture.sampler_descriptor {
+//                     //     sd.address_mode_u = bevy::render::render_resource::AddressMode::Repeat;
+//                     //     sd.address_mode_v = bevy::render::render_resource::AddressMode::Repeat;
+//                     //     sd.address_mode_w = bevy::render::render_resource::AddressMode::Repeat;
+//                     // }
+//                 }
+//             }
+//             _ => (),
+//         }
+//     }
+// }
+
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
+        .add_plugins(DefaultPlugins.set(ImagePlugin {
+            default_sampler: SamplerDescriptor {
+                address_mode_u: AddressMode::Repeat,
+                address_mode_v: AddressMode::Repeat,
+                address_mode_w: AddressMode::Repeat,
+                ..Default::default()
+            },
+        }))
         .add_startup_system(setup)
         .add_system(pan_orbit_camera)
+        // .add_system(set_texture_tiled)
         .run();
 
     // just to catch compilation errors

@@ -110,6 +110,9 @@ pub fn get_segment_mesh(segment: &Segment, width: f32, height: f32) -> Mesh {
     let face_norm = [normal.x, 0.0, normal.y];
     let n_face_norm = [-normal.x, 0.0, -normal.y];
 
+    // true width
+    let t_width = 2. * width;
+
     let v = vec![
         // bottom
         [(n_norm * width + vp1).x, 0.0, (n_norm * width + vp1).y],
@@ -133,8 +136,8 @@ pub fn get_segment_mesh(segment: &Segment, width: f32, height: f32) -> Mesh {
     vertices.append(&mut vec![
         (v[0], [0., -1., 0.], [0., 0.]),
         (v[1], [0., -1., 0.], [1., 0.]),
-        (v[2], [0., -1., 0.], [0., vp_len/2.*width]),
-        (v[3], [0., -1., 0.], [1., vp_len/2.*width]),
+        (v[2], [0., -1., 0.], [0., vp_len/t_width]),
+        (v[3], [0., -1., 0.], [1., vp_len/t_width]),
     ]);
     indices.append(&mut cw_indices(cur_idx_set));
     cur_idx_set += 1;
@@ -143,8 +146,8 @@ pub fn get_segment_mesh(segment: &Segment, width: f32, height: f32) -> Mesh {
     vertices.append(&mut vec![
         (v[4], [0., 1., 0.], [0., 0.]),
         (v[5], [0., 1., 0.], [1., 0.]),
-        (v[6], [0., 1., 0.], [0., vp_len/(2.*width)]),
-        (v[7], [0., 1., 0.], [1., vp_len/(2.*width)]),
+        (v[6], [0., 1., 0.], [0., vp_len/t_width]),
+        (v[7], [0., 1., 0.], [1., vp_len/t_width]),
     ]);
     indices.append(&mut cc_indices(cur_idx_set));
     cur_idx_set += 1;
@@ -152,9 +155,9 @@ pub fn get_segment_mesh(segment: &Segment, width: f32, height: f32) -> Mesh {
     // front
     vertices.append(&mut vec![
         (v[0], n_face_norm, [0., 0.]),
-        (v[4], n_face_norm, [0., 1.]),
-        (v[2], n_face_norm, [1., vp_len/height]),
-        (v[6], n_face_norm, [1., vp_len/height]),
+        (v[4], n_face_norm, [0., height/t_width]),
+        (v[2], n_face_norm, [vp_len/t_width, 0.]),
+        (v[6], n_face_norm, [vp_len/t_width, height/t_width]),
     ]);
     indices.append(&mut cc_indices(cur_idx_set));
     cur_idx_set += 1;
@@ -162,9 +165,9 @@ pub fn get_segment_mesh(segment: &Segment, width: f32, height: f32) -> Mesh {
     // back
     vertices.append(&mut vec![
         (v[1], face_norm, [0., 0.]),
-        (v[5], face_norm, [0., 1.]),
-        (v[3], face_norm, [0., vp_len/height]),
-        (v[7], face_norm, [1., vp_len/height]),
+        (v[5], face_norm, [0., height/t_width]),
+        (v[3], face_norm, [vp_len/t_width, 0.]),
+        (v[7], face_norm, [vp_len/t_width, height/t_width]),
     ]);
     indices.append(&mut cw_indices(cur_idx_set));
     cur_idx_set += 1;
@@ -173,8 +176,8 @@ pub fn get_segment_mesh(segment: &Segment, width: f32, height: f32) -> Mesh {
     vertices.append(&mut vec![
         (v[0], n_face_vp_unit, [0., 0.]),
         (v[1], n_face_vp_unit, [1., 0.]),
-        (v[4], n_face_vp_unit, [0., height/(2.*width)]),
-        (v[5], n_face_vp_unit, [1.0, height/(2.*width)]),
+        (v[4], n_face_vp_unit, [0., height/t_width]),
+        (v[5], n_face_vp_unit, [1.0, height/t_width]),
     ]);
     indices.append(&mut cc_indices(cur_idx_set));
     cur_idx_set += 1;
@@ -183,8 +186,8 @@ pub fn get_segment_mesh(segment: &Segment, width: f32, height: f32) -> Mesh {
     vertices.append(&mut vec![
         (v[2], face_vp_unit, [0., 0.]),
         (v[3], face_vp_unit, [1., 0.]),
-        (v[6], face_vp_unit, [0., height/(2.*width)]),
-        (v[7], face_vp_unit, [1.0, height/(2.*width)]),
+        (v[6], face_vp_unit, [0., height/t_width]),
+        (v[7], face_vp_unit, [1., height/t_width]),
     ]);
     indices.append(&mut cw_indices(cur_idx_set));
     cur_idx_set += 1;
