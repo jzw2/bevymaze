@@ -14,6 +14,7 @@ use crate::maze_render::{
 use crate::test_render::{
     draw_circle, draw_segment, to_canvas_space, AxisTransform, DrawableCircle, DrawableSegment,
 };
+use bevy::input::keyboard::KeyboardInput;
 use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::math::Vec3;
 use bevy::prelude::*;
@@ -54,6 +55,7 @@ fn pan_orbit_camera(
     mut ev_motion: EventReader<MouseMotion>,
     mut ev_scroll: EventReader<MouseWheel>,
     input_mouse: Res<Input<MouseButton>>,
+    input_keyboard: Res<Input<KeyCode>>,
     mut query: Query<(&mut PanOrbitCamera, &mut Transform, &Projection)>,
 ) {
     // change input mapping for orbit and panning here
@@ -69,7 +71,8 @@ fn pan_orbit_camera(
         for ev in ev_motion.iter() {
             rotation_move += ev.delta;
         }
-    } else if input_mouse.pressed(pan_button) {
+    }
+    if input_mouse.pressed(pan_button) || input_keyboard.just_pressed(KeyCode::Space) {
         // Pan only if we're not rotating at the moment
         for ev in ev_motion.iter() {
             pan += ev.delta;
@@ -122,9 +125,9 @@ fn pan_orbit_camera(
             pan_orbit.focus += translation;
         } else if scroll.abs() > 0.0 {
             any = true;
-            pan_orbit.radius -= scroll * pan_orbit.radius * 0.2;
+            pan_orbit.radius -= scroll  * 0.2;
             // dont allow zoom to reach zero or you get stuck
-            pan_orbit.radius = f32::max(pan_orbit.radius, 0.05);
+            //pan_orbit.radius = f32::max(pan_orbit.radius, 0.05);
         }
 
         if any {
@@ -170,6 +173,7 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
 ) {
     // plane
     commands.spawn(PbrBundle {
@@ -202,11 +206,16 @@ fn setup(
     graph.save();
     let graph = SquareMaze::load(graph.offset);
 
+    //leaf texture
+    let texture_handle = asset_server.load("green.png");
+
+
     for mesh in graph.get_wall_geometry(0.1, 0.4) {
         commands.spawn(PbrBundle {
             mesh: meshes.add(mesh),
             material: materials.add(StandardMaterial {
-                base_color: Color::rgba(0.01, 0.8, 0.2, 1.0).into(),
+                // base_color: Color::rgba(0.01, 0.8, 0.2, 1.0).into(),
+                base_color_texture: Some(texture_handle.clone()),
                 alpha_mode: AlphaMode::Multiply,
                 ..default()
             }),
@@ -228,7 +237,7 @@ fn setup(
         color: Color::WHITE,
         brightness: 1.0,
     });
-    commands.insert_resource(ClearColor(Color::rgb_u8(135, 206, 235)));
+    // commands.insert_resource(ClearColor(Color::rgb_u8(0, 0, 0)));
     // camera
     spawn_camera(commands)
 }
