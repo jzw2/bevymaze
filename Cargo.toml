@@ -1,3 +1,11 @@
+[workspace]
+
+members = [
+    "server"
+]
+
+
+
 [package]
 name = "bevymaze"
 version = "0.1.0"
