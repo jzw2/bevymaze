@@ -5,4 +5,14 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lib]
+crate-type=["lib"]
+bench = false
+
 [dependencies]
+bytemuck = "1.13.1"
+fixed = "1.23.1"
+image = "0.24.6"
+itertools = "0.11.0"
+noise = "0.8.2"
+qoi = "0.4.1"

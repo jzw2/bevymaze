@@ -2,6 +2,8 @@
 
 mod maze_gen;
 mod maze_render;
+mod render;
+mod terrain_render;
 mod test_render;
 
 use crate::maze_gen::{
@@ -11,24 +13,30 @@ use crate::maze_gen::{
 use crate::maze_render::{
     get_arc_mesh, get_segment_mesh, polar_to_cart, Arc, Circle, GetWall, Segment,
 };
+use crate::terrain_render::{get_tile_mesh, TILE_WORLD_SIZE};
 use crate::test_render::{
     draw_circle, draw_segment, to_canvas_space, AxisTransform, DrawableCircle, DrawableSegment,
 };
 use bevy::input::keyboard::KeyboardInput;
 use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::math::Vec3;
+use bevy::pbr::wireframe::{WireframeConfig, WireframePlugin};
 use bevy::prelude::*;
 use bevy::render::camera::Projection;
 use bevy::render::mesh::VertexAttributeValues;
 use bevy::render::render_resource::{AddressMode, SamplerDescriptor};
+use bevy::render::settings::{WgpuFeatures, WgpuSettings};
 use bevy::render::texture::ImageSampler::Descriptor;
 use bevy::render::texture::{CompressedImageFormats, ImageSampler, ImageType};
+use bevy::render::RenderPlugin;
 use bevy::window::PrimaryWindow;
 use image::io::Reader as ImageReader;
 use image::{ImageBuffer, Rgb, RgbImage};
 use imageproc::drawing::{draw_text, draw_text_mut};
+use itertools::iproduct;
 use rand::{thread_rng, Rng, RngCore, SeedableRng};
 use rusttype::{Font, Scale};
+use server::terrain_gen::{generate_tile, TerrainGenerator};
 use std::f64::consts::PI;
 use std::fmt::format;
 use std::io::Cursor;
@@ -128,7 +136,7 @@ fn pan_orbit_camera(
             pan_orbit.focus += translation;
         } else if scroll.abs() > 0.0 {
             any = true;
-            pan_orbit.radius -= scroll * 0.2;
+            pan_orbit.radius -= scroll * 0.9;
             // dont allow zoom to reach zero or you get stuck
             //pan_orbit.radius = f32::max(pan_orbit.radius, 0.05);
         }
@@ -174,17 +182,20 @@ fn spawn_camera(mut commands: Commands) {
 /// set up a simple 3D scene
 fn setup(
     mut commands: Commands,
+    mut wireframe_config: ResMut<WireframeConfig>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
 ) {
+    wireframe_config.global = true;
+
     // plane
-    commands.spawn(PbrBundle {
-        mesh: meshes.add(shape::Plane::from_size(1000.0).into()),
-        material: materials.add(Color::rgb(0.3, 0.5, 0.3).into()),
-        transform: Transform::from_xyz(0.0, -1.0, 0.0),
-        ..default()
-    });
+    // commands.spawn(PbrBundle {
+    //     mesh: meshes.add(shape::Plane::from_size(1000.0).into()),
+    //     material: materials.add(Color::rgb(0.3, 0.5, 0.3).into()),
+    //     transform: Transform::from_xyz(0.0, -1.0, 0.0),
+    //     ..default()
+    // });
 
     // let mut graph = CircleMaze {
     //     maze: CircleMazeComponent::new(),
@@ -195,37 +206,37 @@ fn setup(
     //     wall_width: 0.1
     // };
     // let mut starting_comp = CircleMazeComponent::new();
-    let mut graph = SquareMaze {
-        maze: SquareMazeComponent::new(),
-        cell_size: SQUARE_MAZE_CELL_SIZE,
-        offset: (0, 0),
-        size: 32,
-        wall_width: SQUARE_MAZE_WALL_WIDTH,
-    };
-    let mut starting_comp = SquareMazeComponent::new();
-    starting_comp.add_node((-1, 0));
-    populate_maze(&mut graph, vec![starting_comp]);
-
-    graph.save();
-    let graph = SquareMaze::load(graph.offset);
-
-    //leaf texture
-    // let texture_handle = load_tiled_texture(&mut images, "hedge.png");
-    let texture_handle = asset_server.load("hedge.png");
-
-    for mesh in graph.get_wall_geometry(0.1, 0.4) {
-        commands.spawn(PbrBundle {
-            mesh: meshes.add(mesh),
-            material: materials.add(StandardMaterial {
-                // base_color: Color::rgba(0.01, 0.8, 0.2, 1.0).into(),
-                base_color_texture: Some(texture_handle.clone()),
-                alpha_mode: AlphaMode::Mask(0.5),
-                ..default()
-            }),
-            transform: Transform::from_xyz(0.0, 0.0, 0.0),
-            ..default()
-        });
-    }
+    // let mut graph = SquareMaze {
+    //     maze: SquareMazeComponent::new(),
+    //     cell_size: SQUARE_MAZE_CELL_SIZE,
+    //     offset: (0, 0),
+    //     size: 32,
+    //     wall_width: SQUARE_MAZE_WALL_WIDTH,
+    // };
+    // let mut starting_comp = SquareMazeComponent::new();
+    // starting_comp.add_node((-1, 0));
+    // populate_maze(&mut graph, vec![starting_comp]);
+    //
+    // graph.save();
+    // let graph = SquareMaze::load(graph.offset);
+    //
+    // //leaf texture
+    // // let texture_handle = load_tiled_texture(&mut images, "hedge.png");
+    // let texture_handle = asset_server.load("hedge.png");
+    //
+    // for mesh in graph.get_wall_geometry(0.1, 0.4) {
+    //     commands.spawn(PbrBundle {
+    //         mesh: meshes.add(mesh),
+    //         material: materials.add(StandardMaterial {
+    //             // base_color: Color::rgba(0.01, 0.8, 0.2, 1.0).into(),
+    //             base_color_texture: Some(texture_handle.clone()),
+    //             alpha_mode: AlphaMode::Mask(0.5),
+    //             ..default()
+    //         }),
+    //         transform: Transform::from_xyz(0.0, 0.0, 0.0),
+    //         ..default()
+    //     });
+    // }
 
     commands.spawn(DirectionalLightBundle {
         directional_light: DirectionalLight {
@@ -240,73 +251,83 @@ fn setup(
         color: Color::WHITE,
         brightness: 1.0,
     });
-    // commands.insert_resource(ClearColor(Color::rgb_u8(0, 0, 0)));
+
     // camera
     spawn_camera(commands)
 }
 
-pub fn load_tiled_texture(images: &mut Assets<Image>, texture_path: &str) -> Handle<Image> {
-    let ext = std::path::Path::new(texture_path)
-        .extension()
-        .unwrap()
-        .to_str()
-        .unwrap();
-    let img_bytes = std::fs::read(texture_path).unwrap();
-    let mut image = Image::from_buffer(
-        &img_bytes,
-        ImageType::Extension(ext),
-        CompressedImageFormats::all(),
-        true,
-    )
-    .unwrap();
-    image.sampler_descriptor = ImageSampler::Descriptor(SamplerDescriptor {
-        address_mode_u: AddressMode::Repeat,
-        address_mode_v: AddressMode::Repeat,
-        ..Default::default()
+fn create_terrain(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let terrain_gen = TerrainGenerator::new();
+    let xi = 1;
+    let yi = 1;
+    let tile = generate_tile(&terrain_gen, xi, yi);
+    let tile_mesh = get_tile_mesh((xi, yi), &tile);
+    commands.spawn(PbrBundle {
+        mesh: meshes.add(tile_mesh),
+        material: materials.add(StandardMaterial {
+            base_color: Color::rgba(0.01, 0.8, 0.2, 1.0).into(),
+            // base_color_texture: Some(texture_handle.clone()),
+            alpha_mode: AlphaMode::Mask(0.5),
+            ..default()
+        }),
+        // transform: Transform::from_xyz(
+        //     xi as f32 * TILE_WORLD_SIZE,
+        //     0.0,
+        //     yi as f32 * TILE_WORLD_SIZE,
+        // ),
+        ..default()
     });
-    images.add(image)
+    println!("Done tile {} {}", xi, yi);
+    // for (xi, yi) in iproduct!(-3..3, -3..3) {
+    //     let tile = generate_tile(&terrain_gen, xi, yi);
+    //     let tile_mesh = get_tile_mesh((xi, yi), &tile);
+    //     commands.spawn(PbrBundle {
+    //         mesh: meshes.add(tile_mesh),
+    //         material: materials.add(StandardMaterial {
+    //             base_color: Color::rgba(0.01, 0.8, 0.2, 1.0).into(),
+    //             // base_color_texture: Some(texture_handle.clone()),
+    //             alpha_mode: AlphaMode::Mask(0.5),
+    //             ..default()
+    //         }),
+    //         transform: Transform::from_xyz(
+    //             xi as f32 * TILE_WORLD_SIZE,
+    //             0.0,
+    //             yi as f32 * TILE_WORLD_SIZE,
+    //         ),
+    //         ..default()
+    //     });
+    //     println!("Done tile {} {}", xi, yi);
+    // }
+    println!("Done all tiles")
 }
-
-// fn set_texture_tiled(
-//     mut texture_events: EventReader<AssetEvent<Image>>,
-//     mut textures: ResMut<Assets<Image>>,
-// ) {
-//     for event in texture_events.iter() {
-//         match event {
-//             AssetEvent::Created { handle } => {
-//                 if let Some(texture) = textures.get_mut(handle) {
-//                     texture.sampler_descriptor = Descriptor(SamplerDescriptor {
-//                         address_mode_u: AddressMode::Repeat,
-//                         address_mode_v: AddressMode::Repeat,
-//                         ..default()
-//                     });
-//                     // if let Descriptor(ref mut sd) = &texture.sampler_descriptor {
-//                     //     sd.address_mode_u = bevy::render::render_resource::AddressMode::Repeat;
-//                     //     sd.address_mode_v = bevy::render::render_resource::AddressMode::Repeat;
-//                     //     sd.address_mode_w = bevy::render::render_resource::AddressMode::Repeat;
-//                     // }
-//                 }
-//             }
-//             _ => (),
-//         }
-//     }
-// }
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins.set(ImagePlugin {
-            default_sampler: SamplerDescriptor {
-                address_mode_u: AddressMode::Repeat,
-                address_mode_v: AddressMode::Repeat,
-                address_mode_w: AddressMode::Repeat,
-                ..Default::default()
-            },
-        }))
+        .insert_resource(ClearColor(Color::rgb(0.5294, 0.8078, 0.9216)))
+        .add_plugins(
+            DefaultPlugins
+                .set(ImagePlugin {
+                    default_sampler: SamplerDescriptor {
+                        address_mode_u: AddressMode::Repeat,
+                        address_mode_v: AddressMode::Repeat,
+                        address_mode_w: AddressMode::Repeat,
+                        ..Default::default()
+                    },
+                })
+                .set(RenderPlugin {
+                    wgpu_settings: WgpuSettings {
+                        features: WgpuFeatures::POLYGON_MODE_LINE,
+                        ..default()
+                    },
+                }),
+        )
+        .add_plugin(WireframePlugin)
         .add_startup_system(setup)
+        .add_startup_system(create_terrain)
         .add_system(pan_orbit_camera)
-        // .add_system(set_texture_tiled)
         .run();
-
-    // just to catch compilation errors
-    let _ = App::new().add_startup_system(spawn_camera);
 }

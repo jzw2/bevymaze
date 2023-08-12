@@ -4,6 +4,7 @@ use bevy::prelude::{shape, Mesh};
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use petgraph::graphmap::NodeTrait;
 use std::f64::consts::PI;
+use crate::render::{quad_cc_indices, quad_cw_indices, SimpleVertices};
 
 /// A segment with endpoints p1 and p2
 pub struct Segment {
@@ -80,18 +81,6 @@ pub fn distance_to_segment(segment: &Segment, p: (f64, f64)) -> f64 {
     return (seg_p.0 * seg_p.0 + seg_p.1 * seg_p.1).sqrt();
 }
 
-// get the indices of the face in clockwise order
-fn cw_indices(cur_idx_set: u32) -> Vec<u32> {
-    let i = cur_idx_set * 4;
-    return vec![i, i + 1, i + 2, i + 3, i + 2, i + 1];
-}
-
-// get the indices of the face in counterclockwise order
-fn cc_indices(cur_idx_set: u32) -> Vec<u32> {
-    let i = cur_idx_set * 4;
-    return vec![i + 2, i + 1, i, i + 1, i + 2, i + 3];
-}
-
 /// Get the mesh of a segment. The corners are listed clockwise.
 pub fn get_segment_mesh(segment: &Segment, width: f32, height: f32) -> Mesh {
     // get the vector perpendicular to <p2-p1>
@@ -139,7 +128,7 @@ pub fn get_segment_mesh(segment: &Segment, width: f32, height: f32) -> Mesh {
         (v[2], [0., -1., 0.], [0., vp_len/t_width]),
         (v[3], [0., -1., 0.], [1., vp_len/t_width]),
     ]);
-    indices.append(&mut cw_indices(cur_idx_set));
+    indices.append(&mut quad_cw_indices(cur_idx_set));
     cur_idx_set += 1;
 
     // top
@@ -149,7 +138,7 @@ pub fn get_segment_mesh(segment: &Segment, width: f32, height: f32) -> Mesh {
         (v[6], [0., 1., 0.], [0., vp_len/t_width]),
         (v[7], [0., 1., 0.], [1., vp_len/t_width]),
     ]);
-    indices.append(&mut cc_indices(cur_idx_set));
+    indices.append(&mut quad_cc_indices(cur_idx_set));
     cur_idx_set += 1;
 
     // front
@@ -159,7 +148,7 @@ pub fn get_segment_mesh(segment: &Segment, width: f32, height: f32) -> Mesh {
         (v[2], n_face_norm, [vp_len/t_width, 0.]),
         (v[6], n_face_norm, [vp_len/t_width, height/t_width]),
     ]);
-    indices.append(&mut cc_indices(cur_idx_set));
+    indices.append(&mut quad_cc_indices(cur_idx_set));
     cur_idx_set += 1;
 
     // back
@@ -169,7 +158,7 @@ pub fn get_segment_mesh(segment: &Segment, width: f32, height: f32) -> Mesh {
         (v[3], face_norm, [vp_len/t_width, 0.]),
         (v[7], face_norm, [vp_len/t_width, height/t_width]),
     ]);
-    indices.append(&mut cw_indices(cur_idx_set));
+    indices.append(&mut quad_cw_indices(cur_idx_set));
     cur_idx_set += 1;
 
     // left
@@ -179,7 +168,7 @@ pub fn get_segment_mesh(segment: &Segment, width: f32, height: f32) -> Mesh {
         (v[4], n_face_vp_unit, [0., height/t_width]),
         (v[5], n_face_vp_unit, [1.0, height/t_width]),
     ]);
-    indices.append(&mut cc_indices(cur_idx_set));
+    indices.append(&mut quad_cc_indices(cur_idx_set));
     cur_idx_set += 1;
 
     // right
@@ -189,7 +178,7 @@ pub fn get_segment_mesh(segment: &Segment, width: f32, height: f32) -> Mesh {
         (v[6], face_vp_unit, [0., height/t_width]),
         (v[7], face_vp_unit, [1., height/t_width]),
     ]);
-    indices.append(&mut cw_indices(cur_idx_set));
+    indices.append(&mut quad_cw_indices(cur_idx_set));
     cur_idx_set += 1;
 
     let positions: Vec<_> = vertices.iter().map(|(p, _, _)| *p).collect();
@@ -229,7 +218,7 @@ pub fn get_arc_mesh(arc: &Arc, width: f32, height: f32, divisions: u32) -> Mesh 
     let divisions = divisions + 2;
 
     // simple vertex positions
-    let mut v: Vec<[f32; 3]> = Vec::new();
+    let mut v: SimpleVertices = Vec::new();
 
     // first construct the list of points that make up the bottom of the arc mesh
     for i in 0..divisions {
@@ -302,7 +291,7 @@ pub fn get_arc_mesh(arc: &Arc, width: f32, height: f32, divisions: u32) -> Mesh 
             (v[i3], b_norm, [1.0, 1.]),
         ]);
         // add verts clockwise
-        indices.append(&mut cw_indices(cur_idx_set));
+        indices.append(&mut quad_cw_indices(cur_idx_set));
         cur_idx_set += 1;
     }
     // create the top
@@ -318,7 +307,7 @@ pub fn get_arc_mesh(arc: &Arc, width: f32, height: f32, divisions: u32) -> Mesh 
             (v[i2], t_norm, [0.0, 1.]),
             (v[i3], t_norm, [1.0, 1.]),
         ]);
-        indices.append(&mut cc_indices(cur_idx_set));
+        indices.append(&mut quad_cc_indices(cur_idx_set));
         cur_idx_set += 1;
     }
 
@@ -341,7 +330,7 @@ pub fn get_arc_mesh(arc: &Arc, width: f32, height: f32, divisions: u32) -> Mesh 
             (v[i2], i1_norm, [0.0, 1.]),
             (v[i3], i1_norm, [1.0, 1.]),
         ]);
-        indices.append(&mut cw_indices(cur_idx_set));
+        indices.append(&mut quad_cw_indices(cur_idx_set));
         cur_idx_set += 1;
     }
 
@@ -364,7 +353,7 @@ pub fn get_arc_mesh(arc: &Arc, width: f32, height: f32, divisions: u32) -> Mesh 
             (v[i2], i1_norm, [0.0, 1.]),
             (v[i3], i1_norm, [1.0, 1.]),
         ]);
-        indices.append(&mut cc_indices(cur_idx_set));
+        indices.append(&mut quad_cc_indices(cur_idx_set));
         cur_idx_set += 1;
     }
 
@@ -383,7 +372,7 @@ pub fn get_arc_mesh(arc: &Arc, width: f32, height: f32, divisions: u32) -> Mesh 
         (v[i2], c_norm, [0.0, 1.]),
         (v[i3], c_norm, [1.0, 1.]),
     ]);
-    indices.append(&mut cc_indices(cur_idx_set));
+    indices.append(&mut quad_cc_indices(cur_idx_set));
     cur_idx_set += 1;
 
     // counterclockwise end
@@ -401,7 +390,7 @@ pub fn get_arc_mesh(arc: &Arc, width: f32, height: f32, divisions: u32) -> Mesh 
         (v[i2], cc_norm, [0.0, 1.]),
         (v[i3], cc_norm, [1.0, 1.]),
     ]);
-    indices.append(&mut cw_indices(cur_idx_set));
+    indices.append(&mut quad_cw_indices(cur_idx_set));
     cur_idx_set += 1;
 
     let positions: Vec<_> = vertices.iter().map(|(p, _, _)| *p).collect();
