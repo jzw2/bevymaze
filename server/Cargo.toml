@@ -10,6 +10,7 @@ crate-type=["lib"]
 bench = false
 
 [dependencies]
+bevy = "0.11.0"
 bytemuck = "1.13.1"
 fixed = "1.23.1"
 image = "0.24.6"

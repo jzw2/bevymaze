@@ -17,6 +17,7 @@ use crate::terrain_render::{get_tile_mesh, TILE_WORLD_SIZE};
 use crate::test_render::{
     draw_circle, draw_segment, to_canvas_space, AxisTransform, DrawableCircle, DrawableSegment,
 };
+use bevy::app::RunFixedUpdateLoop;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::math::Vec3;
@@ -37,6 +38,7 @@ use itertools::iproduct;
 use rand::{thread_rng, Rng, RngCore, SeedableRng};
 use rusttype::{Font, Scale};
 use server::terrain_gen::{generate_tile, TerrainGenerator};
+use server::util::lin_map32;
 use std::f64::consts::PI;
 use std::fmt::format;
 use std::io::Cursor;
@@ -182,12 +184,12 @@ fn spawn_camera(mut commands: Commands) {
 /// set up a simple 3D scene
 fn setup(
     mut commands: Commands,
-    mut wireframe_config: ResMut<WireframeConfig>,
+    // mut wireframe_config: ResMut<WireframeConfig>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
 ) {
-    wireframe_config.global = true;
+    // wireframe_config.global = true;
 
     // plane
     // commands.spawn(PbrBundle {
@@ -262,72 +264,64 @@ fn create_terrain(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let terrain_gen = TerrainGenerator::new();
-    let xi = 1;
-    let yi = 1;
-    let tile = generate_tile(&terrain_gen, xi, yi);
-    let tile_mesh = get_tile_mesh((xi, yi), &tile);
-    commands.spawn(PbrBundle {
-        mesh: meshes.add(tile_mesh),
-        material: materials.add(StandardMaterial {
-            base_color: Color::rgba(0.01, 0.8, 0.2, 1.0).into(),
-            // base_color_texture: Some(texture_handle.clone()),
-            alpha_mode: AlphaMode::Mask(0.5),
+    for (xi, yi) in iproduct!(-30..30, -2..400) {
+        let tile = generate_tile(&terrain_gen, xi, yi);
+        let tile_mesh = get_tile_mesh((xi, yi), &tile);
+        commands.spawn(PbrBundle {
+            mesh: meshes.add(tile_mesh),
+            material: materials.add(StandardMaterial {
+                // base_color: Color::rgba_u8(color[0], color[1], color[2], 255),
+                // base_color_texture: Some(texture_handle.clone()),
+                alpha_mode: AlphaMode::Mask(0.5),
+                ..default()
+            }),
+            transform: Transform::from_xyz(
+                xi as f32 * TILE_WORLD_SIZE,
+                0.0,
+                yi as f32 * TILE_WORLD_SIZE,
+            ),
             ..default()
-        }),
-        // transform: Transform::from_xyz(
-        //     xi as f32 * TILE_WORLD_SIZE,
-        //     0.0,
-        //     yi as f32 * TILE_WORLD_SIZE,
-        // ),
-        ..default()
-    });
-    println!("Done tile {} {}", xi, yi);
-    // for (xi, yi) in iproduct!(-3..3, -3..3) {
-    //     let tile = generate_tile(&terrain_gen, xi, yi);
-    //     let tile_mesh = get_tile_mesh((xi, yi), &tile);
-    //     commands.spawn(PbrBundle {
-    //         mesh: meshes.add(tile_mesh),
-    //         material: materials.add(StandardMaterial {
-    //             base_color: Color::rgba(0.01, 0.8, 0.2, 1.0).into(),
-    //             // base_color_texture: Some(texture_handle.clone()),
-    //             alpha_mode: AlphaMode::Mask(0.5),
-    //             ..default()
-    //         }),
-    //         transform: Transform::from_xyz(
-    //             xi as f32 * TILE_WORLD_SIZE,
-    //             0.0,
-    //             yi as f32 * TILE_WORLD_SIZE,
-    //         ),
-    //         ..default()
-    //     });
-    //     println!("Done tile {} {}", xi, yi);
-    // }
+        });
+        println!("Done tile {} {}", xi, yi);
+    }
     println!("Done all tiles")
 }
 
 fn main() {
-    App::new()
+    let _ = App::new()
         .insert_resource(ClearColor(Color::rgb(0.5294, 0.8078, 0.9216)))
         .add_plugins(
-            DefaultPlugins
-                .set(ImagePlugin {
-                    default_sampler: SamplerDescriptor {
-                        address_mode_u: AddressMode::Repeat,
-                        address_mode_v: AddressMode::Repeat,
-                        address_mode_w: AddressMode::Repeat,
-                        ..Default::default()
-                    },
-                })
-                .set(RenderPlugin {
-                    wgpu_settings: WgpuSettings {
-                        features: WgpuFeatures::POLYGON_MODE_LINE,
-                        ..default()
-                    },
-                }),
+            DefaultPlugins.set(ImagePlugin {
+                default_sampler: SamplerDescriptor {
+                    address_mode_u: AddressMode::Repeat,
+                    address_mode_v: AddressMode::Repeat,
+                    address_mode_w: AddressMode::Repeat,
+                    ..Default::default()
+                },
+            }), // .set(RenderPlugin {
+                //     wgpu_settings: WgpuSettings {
+                //         features: WgpuFeatures::POLYGON_MODE_LINE,
+                //         ..default()
+                //     },
+                // }),
         )
-        .add_plugin(WireframePlugin)
-        .add_startup_system(setup)
-        .add_startup_system(create_terrain)
-        .add_system(pan_orbit_camera)
+        // .add_plugin(WireframePlugin)
+        .add_systems(Startup, setup)
+        .add_systems(Startup, create_terrain)
+        .add_systems(RunFixedUpdateLoop, pan_orbit_camera)
         .run();
+
+    // let terrain_gen = TerrainGenerator::new();
+    // let tile = generate_tile(&terrain_gen, 0, 0);
+    // let mut img: RgbImage = ImageBuffer::new(tile.0.len() as u32, tile.0.len() as u32);
+    //
+    // for x in 0..img.width() {
+    //     for y in 0..img.height() {
+    //         let val = tile.0[x as usize][y as usize];
+    //         let res = lin_map32(-2., 25., 0., 255., val).round() as u8;
+    //         img.put_pixel(x, y, Rgb([res, res, res]));
+    //     }
+    // }
+    //
+    // img.save("terrain_out.png").unwrap();
 }
