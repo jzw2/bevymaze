@@ -1,19 +1,28 @@
-use image::{ImageBuffer, Rgb, Rgba, RgbaImage, RgbImage};
-use itertools::iproduct;
-use crate::terrain_gen::{generate_tile, TerrainGenerator};
-use crate::util::lin_map;
+use tokio::net::{TcpListener, TcpStream};
+use mini_redis::{Connection, Frame};
 
-mod terrain_gen;
-mod util;
+#[tokio::main]
+async fn main() {
+    // Bind the listener to the address
+    let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
 
-fn main() {
-    let terrain_gen = TerrainGenerator::new();
-    let tile1 = generate_tile(&terrain_gen, 0, 0);
-    let mut image = RgbImage::from_pixel(1024, 1024, Rgb([255, 255, 255]));
-    for (px, py) in iproduct!(0..1024, 0..1024) {
-        let pixel_val = f32::from_bits(tile1[px][py]);
-        let pixel_val = lin_map(0., 128. + 90. + 4., 0., 255., pixel_val as f64) as u8;
-        image.put_pixel(px as u32, py as u32, Rgb([pixel_val, pixel_val, pixel_val]));
+    loop {
+        // The second item contains the IP and port of the new connection.
+        let (socket, _) = listener.accept().await.unwrap();
+        process(socket).await;
     }
-    image.save("output.png").unwrap();
+}
+
+async fn process(socket: TcpStream) {
+    // The `Connection` lets us read/write redis **frames** instead of
+    // byte streams. The `Connection` type is defined by mini-redis.
+    let mut connection = Connection::new(socket);
+
+    if let Some(frame) = connection.read_frame().await.unwrap() {
+        println!("GOT: {:?}", frame);
+
+        // Respond with an error
+        let response = Frame::Error("unimplemented".to_string());
+        connection.write_frame(&response).await.unwrap();
+    }
 }
