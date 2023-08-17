@@ -23,9 +23,10 @@ use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::math::Vec3;
 use bevy::pbr::wireframe::{WireframeConfig, WireframePlugin};
 use bevy::prelude::*;
+use bevy::reflect::{TypePath, TypeUuid};
 use bevy::render::camera::Projection;
 use bevy::render::mesh::VertexAttributeValues;
-use bevy::render::render_resource::{AddressMode, SamplerDescriptor};
+use bevy::render::render_resource::{AddressMode, AsBindGroup, SamplerDescriptor, ShaderRef};
 use bevy::render::settings::{WgpuFeatures, WgpuSettings};
 use bevy::render::texture::ImageSampler::Descriptor;
 use bevy::render::texture::{CompressedImageFormats, ImageSampler, ImageType};
@@ -37,11 +38,46 @@ use imageproc::drawing::{draw_text, draw_text_mut};
 use itertools::iproduct;
 use rand::{thread_rng, Rng, RngCore, SeedableRng};
 use rusttype::{Font, Scale};
-use server::terrain_gen::{generate_tile, TerrainGenerator};
+use server::terrain_gen::{generate_tile, TerrainGenerator, MAX_HEIGHT};
 use server::util::lin_map32;
-use std::f64::consts::PI;
+use std::f32::consts::PI;
 use std::fmt::format;
 use std::io::Cursor;
+use bevy::pbr::MaterialPipeline;
+use bevy_shader_utils::ShaderUtilsPlugin;
+
+#[derive(AsBindGroup, Debug, Clone, TypeUuid, TypePath)]
+#[uuid = "b62bb455-a72c-4b56-87bb-81e0554e234f"]
+pub struct TerrainMaterial {
+    #[uniform(0)]
+    max_height: f32,
+    #[uniform(1)]
+    grass_line: f32,
+    #[uniform(2)]
+    tree_line: f32,
+    #[uniform(3)]
+    snow_line: f32,
+    #[uniform(4)]
+    grass_color: Color,
+    #[uniform(5)]
+    tree_color: Color,
+    #[uniform(6)]
+    snow_color: Color,
+    #[uniform(7)]
+    stone_color: Color,
+    #[uniform(8)]
+    cosine_max_snow_slope: f32,
+    #[uniform(9)]
+    cosine_max_tree_slope: f32,
+}
+
+/// The Material trait is very configurable, but comes with sensible defaults for all methods.
+/// You only need to implement functions for features that need non-default behavior. See the Material api docs for details!
+impl Material for TerrainMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "shaders/terrain_color.wgsl".into()
+    }
+}
 
 // /// Tags an entity as capable of panning and orbiting.
 #[derive(Component)]
@@ -71,6 +107,8 @@ fn pan_orbit_camera(
     input_keyboard: Res<Input<KeyCode>>,
     mut query: Query<(&mut PanOrbitCamera, &mut Transform, &Projection)>,
 ) {
+
+    StandardMaterial { ..default() };
     // change input mapping for orbit and panning here
     let orbit_button = MouseButton::Right;
     let pan_button = MouseButton::Middle;
@@ -138,7 +176,7 @@ fn pan_orbit_camera(
             pan_orbit.focus += translation;
         } else if scroll.abs() > 0.0 {
             any = true;
-            pan_orbit.radius -= scroll * 0.9;
+            pan_orbit.radius -= 2. * scroll;
             // dont allow zoom to reach zero or you get stuck
             //pan_orbit.radius = f32::max(pan_orbit.radius, 0.05);
         }
@@ -185,61 +223,7 @@ fn spawn_camera(mut commands: Commands) {
 fn setup(
     mut commands: Commands,
     // mut wireframe_config: ResMut<WireframeConfig>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    asset_server: Res<AssetServer>,
 ) {
-    // wireframe_config.global = true;
-
-    // plane
-    // commands.spawn(PbrBundle {
-    //     mesh: meshes.add(shape::Plane::from_size(1000.0).into()),
-    //     material: materials.add(Color::rgb(0.3, 0.5, 0.3).into()),
-    //     transform: Transform::from_xyz(0.0, -1.0, 0.0),
-    //     ..default()
-    // });
-
-    // let mut graph = CircleMaze {
-    //     maze: CircleMazeComponent::new(),
-    //     cell_size: 1.0,
-    //     center: (0, 0),
-    //     radius: 13,
-    //     min_path_width: 1.0,
-    //     wall_width: 0.1
-    // };
-    // let mut starting_comp = CircleMazeComponent::new();
-    // let mut graph = SquareMaze {
-    //     maze: SquareMazeComponent::new(),
-    //     cell_size: SQUARE_MAZE_CELL_SIZE,
-    //     offset: (0, 0),
-    //     size: 32,
-    //     wall_width: SQUARE_MAZE_WALL_WIDTH,
-    // };
-    // let mut starting_comp = SquareMazeComponent::new();
-    // starting_comp.add_node((-1, 0));
-    // populate_maze(&mut graph, vec![starting_comp]);
-    //
-    // graph.save();
-    // let graph = SquareMaze::load(graph.offset);
-    //
-    // //leaf texture
-    // // let texture_handle = load_tiled_texture(&mut images, "hedge.png");
-    // let texture_handle = asset_server.load("hedge.png");
-    //
-    // for mesh in graph.get_wall_geometry(0.1, 0.4) {
-    //     commands.spawn(PbrBundle {
-    //         mesh: meshes.add(mesh),
-    //         material: materials.add(StandardMaterial {
-    //             // base_color: Color::rgba(0.01, 0.8, 0.2, 1.0).into(),
-    //             base_color_texture: Some(texture_handle.clone()),
-    //             alpha_mode: AlphaMode::Mask(0.5),
-    //             ..default()
-    //         }),
-    //         transform: Transform::from_xyz(0.0, 0.0, 0.0),
-    //         ..default()
-    //     });
-    // }
-
     commands.spawn(DirectionalLightBundle {
         directional_light: DirectionalLight {
             illuminance: 64000.0,
@@ -261,19 +245,27 @@ fn setup(
 fn create_terrain(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<TerrainMaterial>>,
 ) {
     let terrain_gen = TerrainGenerator::new();
-    for (xi, yi) in iproduct!(-30..30, -2..400) {
+    let mut triangles = 0usize;
+    for (xi, yi) in iproduct!(-25..25, -1..100) {
         let tile = generate_tile(&terrain_gen, xi, yi);
         let tile_mesh = get_tile_mesh((xi, yi), &tile);
-        commands.spawn(PbrBundle {
+        triangles += tile_mesh.indices().unwrap().len() / 3;
+        commands.spawn(MaterialMeshBundle {
             mesh: meshes.add(tile_mesh),
-            material: materials.add(StandardMaterial {
-                // base_color: Color::rgba_u8(color[0], color[1], color[2], 255),
-                // base_color_texture: Some(texture_handle.clone()),
-                alpha_mode: AlphaMode::Mask(0.5),
-                ..default()
+            material: materials.add(TerrainMaterial {
+                max_height: MAX_HEIGHT as f32,
+                grass_line: 0.15,
+                grass_color: Color::from([0.1, 0.5, 0.2, 1.]),
+                tree_line: 0.5,
+                tree_color: Color::from([0.2, 0.6, 0.25, 1.]),
+                snow_line: 0.75,
+                snow_color: Color::from([0.95, 0.95, 0.95, 1.]),
+                stone_color: Color::from([0.34, 0.34, 0.34, 1.]),
+                cosine_max_snow_slope: (45. * PI / 180.).cos(),
+                cosine_max_tree_slope: (40. * PI / 180.).cos()
             }),
             transform: Transform::from_xyz(
                 xi as f32 * TILE_WORLD_SIZE,
@@ -284,26 +276,30 @@ fn create_terrain(
         });
         println!("Done tile {} {}", xi, yi);
     }
-    println!("Done all tiles")
+    println!("Done all tiles, triangles is {}", triangles)
 }
 
 fn main() {
     let _ = App::new()
         .insert_resource(ClearColor(Color::rgb(0.5294, 0.8078, 0.9216)))
         .add_plugins(
-            DefaultPlugins.set(ImagePlugin {
-                default_sampler: SamplerDescriptor {
-                    address_mode_u: AddressMode::Repeat,
-                    address_mode_v: AddressMode::Repeat,
-                    address_mode_w: AddressMode::Repeat,
-                    ..Default::default()
-                },
-            }), // .set(RenderPlugin {
-                //     wgpu_settings: WgpuSettings {
-                //         features: WgpuFeatures::POLYGON_MODE_LINE,
-                //         ..default()
-                //     },
-                // }),
+            (
+                DefaultPlugins.set(ImagePlugin {
+                    default_sampler: SamplerDescriptor {
+                        address_mode_u: AddressMode::Repeat,
+                        address_mode_v: AddressMode::Repeat,
+                        address_mode_w: AddressMode::Repeat,
+                        ..Default::default()
+                    },
+                }),
+                MaterialPlugin::<TerrainMaterial>::default(),
+                ShaderUtilsPlugin
+            ), // .set(RenderPlugin {
+               //     wgpu_settings: WgpuSettings {
+               //         features: WgpuFeatures::POLYGON_MODE_LINE,
+               //         ..default()
+               //     },
+               // }),
         )
         // .add_plugin(WireframePlugin)
         .add_systems(Startup, setup)

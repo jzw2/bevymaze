@@ -6,19 +6,20 @@ use noise::{NoiseFn, Perlin, Simplex};
 use qoi::{decode_to_vec, encode_to_vec, Encoder};
 use std::cmp::max;
 
-const TILE_RESOLUTION: usize = 128usize;
-pub const TILE_SIZE: f64 = 100.;
-const FOOTHILL_START: f64 = 20.*TILE_SIZE;
-const MOUNTAIN_OFFSET: f64 = 300.;
+const TILE_RESOLUTION: usize = 256usize;
+pub const TILE_SIZE: f64 = 1000.;
 const HEIGHT_SCALING: f64 = 1.;
-const MOUNTAIN_HEIGHT_OFFSET: f64 = 128.;
-const MOUNTAIN_BIG_AMP: f64 = 90.;
-const MOUNTAIN_SMALL_AMP: f64 = 5.;
+const MOUNTAIN_HEIGHT_OFFSET: f64 = 128. * 10.;
+const MOUNTAIN_BIG_AMP: f64 = 90. * 10.;
+const MOUNTAIN_SMALL_AMP: f64 = 5. * 10.;
+const MOUNTAIN_MICRO_AMP: f64 = 20.;
 pub const MAX_HEIGHT: f64 =
-    HEIGHT_SCALING * (MOUNTAIN_HEIGHT_OFFSET + MOUNTAIN_BIG_AMP + MOUNTAIN_SMALL_AMP);
+    HEIGHT_SCALING * (MOUNTAIN_HEIGHT_OFFSET + MOUNTAIN_BIG_AMP + MOUNTAIN_SMALL_AMP + MOUNTAIN_MICRO_AMP);
+const FOOTHILL_START: f64 = 10.*TILE_SIZE;
+const MOUNTAIN_OFFSET: f64 = MAX_HEIGHT*1.1;
 
-pub type HeightMap = Vec<Vec<f32>>;
-pub type TerrainNormals = Vec<Vec<Vec3>>;
+pub type HeightMap = Vec<[f32; TILE_RESOLUTION]>;
+pub type TerrainNormals = Vec<[Vec3; TILE_RESOLUTION]>;
 pub type Tile = (HeightMap, TerrainNormals);
 
 pub struct TerrainGenerator {
@@ -39,15 +40,18 @@ impl TerrainGenerator {
         let x = x * scale;
         let z = y * scale;
 
-        let freq1 = 0.2f64;
-        let freq2 = 12.0 * 0.2;
+        let freq1 = 0.02f64;
+        let freq2 = 12.0 * freq1;
+        let freq3 = 4. * freq2;
 
         let amp1 = MOUNTAIN_BIG_AMP;
         let amp2 = MOUNTAIN_SMALL_AMP;
+        let amp3 = MOUNTAIN_MICRO_AMP;
 
         return self.mountain_noise_generators[0].get([x * freq1, z * freq1]) * amp1 / 2.
-            + self.mountain_noise_generators[2].get([x * freq2, z * freq2]) * amp2 / 2.
-            + (amp1 + amp2) / 2.
+            + self.mountain_noise_generators[1].get([x * freq2, z * freq2]) * amp2 / 2.
+            + self.mountain_noise_generators[2].get([x * freq3, z * freq3]) * amp3 / 2.
+            + (amp1 + amp2 + amp3) / 2.
             + MOUNTAIN_HEIGHT_OFFSET;
     }
 
@@ -95,8 +99,8 @@ impl TerrainGenerator {
 }
 
 pub fn generate_tile(generator: &TerrainGenerator, x: i64, y: i64) -> Tile {
-    let mut raw: HeightMap = vec![vec![0.; TILE_RESOLUTION]; TILE_RESOLUTION];
-    let mut normal: TerrainNormals = vec![vec![Vec3::ZERO; TILE_RESOLUTION]; TILE_RESOLUTION];
+    let mut raw: HeightMap = vec![[0.; TILE_RESOLUTION]; TILE_RESOLUTION];
+    let mut normal: TerrainNormals = vec![[Vec3::ZERO; TILE_RESOLUTION]; TILE_RESOLUTION];
     for (xpixel, ypixel) in iproduct!(0..TILE_RESOLUTION, 0..TILE_RESOLUTION) {
         let xpos = (x as f64 + xpixel as f64 / (TILE_RESOLUTION - 1) as f64) * TILE_SIZE;
         let ypos = (y as f64 + ypixel as f64 / (TILE_RESOLUTION - 1) as f64) * TILE_SIZE;

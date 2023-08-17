@@ -13,7 +13,7 @@ use std::mem::swap;
 use std::os::unix::raw::time_t;
 
 pub const TILE_WORLD_SIZE: f32 = TILE_SIZE as f32;
-const BASE_VERTICES: f64 = 2048.;
+const BASE_VERTICES: f64 = 8182.*4.;
 const FREE_SUBDIVISIONS: f64 = 2.;
 lazy_static! {
     pub static ref BASE_SUBDIVISIONS: f64 = BASE_VERTICES.sqrt();
@@ -27,7 +27,7 @@ fn get_tile_dist(t1_off: TileOffset, t2_off: TileOffset) -> f64 {
 }
 
 fn get_side_subdivs(d: f64) -> f32 {
-    return ((*BASE_SUBDIVISIONS / (d + 1.)) + FREE_SUBDIVISIONS).round() as f32;
+    return ((*BASE_SUBDIVISIONS / ((d + 1.)*(d + 1.))) + FREE_SUBDIVISIONS).round() as f32;
 }
 
 /// Gets the height of the tile for a tile position
@@ -298,6 +298,6 @@ pub fn get_tile_mesh(tile_offset: TileOffset, tile: &Tile) -> Mesh {
     // mesh.compute_flat_normals();
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
     mesh.set_indices(Some(Indices::U32(indices)));
-    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+    // mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
     return mesh;
 }
