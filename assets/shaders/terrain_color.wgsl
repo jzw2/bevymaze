@@ -38,6 +38,10 @@ var<uniform> stone_color: vec4<f32>;
 var<uniform> cosine_max_snow_slope: f32;
 @group(1) @binding(9)
 var<uniform> cosine_max_tree_slope: f32;
+@group(1) @binding(10)
+var normal_texture: texture_2d<f32>;
+@group(1) @binding(11)
+var normal_sampler: sampler;
 
 @fragment
 fn fragment(
@@ -46,8 +50,11 @@ fn fragment(
     var pbr = pbr_functions::pbr_input_new();
     pbr.frag_coord = in.position;
     pbr.world_position = in.world_position;
-    pbr.world_normal = in.world_normal;
-    pbr.N = in.world_normal;
+
+    let n_vec4 = textureSample(normal_texture, normal_sampler, in.uv);
+    let normal = vec3(n_vec4[0], n_vec4[1], n_vec4[2]);
+    pbr.world_normal = normal;
+    pbr.N = normal;
     pbr.V = pbr_functions::calculate_view(in.world_position, false);
 
     var cosine_angle = dot(in.world_normal, vec3(0.0, 1.0, 0.0));

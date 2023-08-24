@@ -1,5 +1,5 @@
 use crate::render::{
-    quad_cc_indices, quad_cc_indices_off, quad_cw_indices_off, tri_cc_indices_off,
+    quad_cc_indices, quad_cc_indices_off, quad_cw_indices_off, tri_cc_indices, tri_cc_indices_off,
     tri_cw_indices_off, CompleteVertices,
 };
 use bevy::math::Vec3;
@@ -7,27 +7,46 @@ use bevy::prelude::Mesh;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use itertools::iproduct;
 use lazy_static::lazy_static;
-use server::terrain_gen::{HeightMap, TerrainNormals, Tile, MAX_HEIGHT, TILE_SIZE};
+use server::terrain_gen::{HeightMap, TerrainNormals, Tile, MAX_HEIGHT, TILE_SIZE, TILE_RESOLUTION};
 use server::util::{lin_map, lin_map32};
 use std::mem::swap;
 use std::os::unix::raw::time_t;
+use bevy::prelude::system_adapter::new;
+use image::DynamicImage;
+use image::imageops::FilterType;
 
 pub const TILE_WORLD_SIZE: f32 = TILE_SIZE as f32;
-const BASE_VERTICES: f64 = 8182.*4.;
+const BASE_VERTICES: f64 = 8182.;
 const FREE_SUBDIVISIONS: f64 = 2.;
 lazy_static! {
     pub static ref BASE_SUBDIVISIONS: f64 = BASE_VERTICES.sqrt();
 }
+const MIN_RESOLUTION: f64 = 16.;
 
 type TileOffset = (i64, i64);
 
-fn get_tile_dist(t1_off: TileOffset, t2_off: TileOffset) -> f64 {
+pub fn get_tile_dist(t1_off: TileOffset, t2_off: TileOffset) -> f64 {
     let d = (t1_off.0 - t2_off.0, t1_off.1 - t2_off.1);
     return ((d.0 * d.0 + d.1 * d.1) as f64).sqrt();
 }
 
 fn get_side_subdivs(d: f64) -> f32 {
-    return ((*BASE_SUBDIVISIONS / ((d + 1.)*(d + 1.))) + FREE_SUBDIVISIONS).round() as f32;
+    return ((*BASE_SUBDIVISIONS / (d + 1.)) + FREE_SUBDIVISIONS).round() as f32;
+}
+
+fn get_tile_resolution(d: f64) -> f64 {
+    return TILE_RESOLUTION as f64;
+    let d = 0.01 * d;
+    return ((TILE_RESOLUTION as f64 - MIN_RESOLUTION) / (d + 1.) + MIN_RESOLUTION).round();
+}
+
+/// Get a new image scaled for the distance specified
+pub fn get_scaled_normal_map(normals: DynamicImage, tile_dist: f64) -> DynamicImage {
+    let new_res = get_tile_resolution(tile_dist) as u32;
+    let new_img = normals.resize_exact(new_res, new_res, FilterType::Nearest);
+    println!("dist {} new {}", tile_dist, new_res);
+    new_img.save(format!("{}.png", tile_dist));
+    return new_img;
 }
 
 /// Gets the height of the tile for a tile position
@@ -98,10 +117,10 @@ pub fn get_tile_mesh(tile_offset: TileOffset, tile: &Tile) -> Mesh {
                 yi1 * TILE_WORLD_SIZE,
             ];
             vertices.append(&mut vec![
-                (v1, get_tile_normal(xi0, yi0, normals), [0.0, 0.]),
-                (v2, get_tile_normal(xi1, yi0, normals), [1.0, 0.]),
-                (v3, get_tile_normal(xi0, yi1, normals), [0.0, 1.]),
-                (v4, get_tile_normal(xi1, yi1, normals), [1.0, 1.]),
+                (v1, get_tile_normal(xi0, yi0, normals), [xi0, yi0]),
+                (v2, get_tile_normal(xi1, yi0, normals), [xi1, yi0]),
+                (v3, get_tile_normal(xi0, yi1, normals), [xi0, yi1]),
+                (v4, get_tile_normal(xi1, yi1, normals), [xi1, yi1]),
             ]);
             indices.append(&mut quad_cc_indices(cur_idx_set));
             cur_idx_set += 1;
@@ -133,47 +152,55 @@ pub fn get_tile_mesh(tile_offset: TileOffset, tile: &Tile) -> Mesh {
         let x1r = (xi + 1) as f32 / greater_subdivs;
         let mut c0r = (xi as f32 * lesser_subdivs / greater_subdivs).round() / lesser_subdivs;
         let c1r = ((xi + 1) as f32 * lesser_subdivs / greater_subdivs).round() / lesser_subdivs;
-        let mut v1 = [[
-            x0r * TILE_WORLD_SIZE,
-            get_tile_height(x0r, y0r, height_map),
-            y0r * TILE_WORLD_SIZE,
-        ], get_tile_normal(x0r, y0r, normals)];
-        let mut v2 = [[
-            x1r * TILE_WORLD_SIZE,
-            get_tile_height(x1r, y0r, height_map),
-            y0r * TILE_WORLD_SIZE,
-        ], get_tile_normal(x1r, y0r, normals)];
-        let mut v3 = [[
-            c0r * TILE_WORLD_SIZE,
-            get_tile_height(c0r, y1r, height_map),
-            y1r * TILE_WORLD_SIZE,
-        ], get_tile_normal(c0r, y1r, normals)];
-        if c0r != c1r {
-            let mut v4 = [[
-                c1r * TILE_WORLD_SIZE,
-                get_tile_height(c1r, y1r, height_map),
+        let mut v1 = (
+            [
+                x0r * TILE_WORLD_SIZE,
+                get_tile_height(x0r, y0r, height_map),
+                y0r * TILE_WORLD_SIZE,
+            ],
+            get_tile_normal(x0r, y0r, normals),
+            [x0r, y0r],
+        );
+        let mut v2 = (
+            [
+                x1r * TILE_WORLD_SIZE,
+                get_tile_height(x1r, y0r, height_map),
+                y0r * TILE_WORLD_SIZE,
+            ],
+            get_tile_normal(x1r, y0r, normals),
+            [x1r, y0r],
+        );
+        let mut v3 = (
+            [
+                c0r * TILE_WORLD_SIZE,
+                get_tile_height(c0r, y1r, height_map),
                 y1r * TILE_WORLD_SIZE,
-            ], get_tile_normal(c1r, y1r, normals)];
+            ],
+            get_tile_normal(c0r, y1r, normals),
+            [c0r, y1r],
+        );
+
+        if c0r != c1r {
+            let mut v4 = (
+                [
+                    c1r * TILE_WORLD_SIZE,
+                    get_tile_height(c1r, y1r, height_map),
+                    y1r * TILE_WORLD_SIZE,
+                ],
+                get_tile_normal(c1r, y1r, normals),
+                [c1r, y1r],
+            );
             // we swap the here to keep the quads consistent
             // only swap if we swapped the y positions previous
             if subdivs <= bottom_subdivs {
                 swap(&mut v1, &mut v3);
                 swap(&mut v2, &mut v4);
             }
-            vertices.append(&mut vec![
-                (v1[0], v1[1], [0.0, 0.]),
-                (v2[0], v2[1], [1.0, 0.]),
-                (v3[0], v3[1], [0.0, 1.]),
-                (v4[0], v4[1], [1.0, 1.]),
-            ]);
+            vertices.append(&mut vec![v1, v2, v3, v4]);
             indices.append(&mut quad_cc_indices_off(idx_off));
             idx_off += 4;
         } else {
-            vertices.append(&mut vec![
-                (v1[0], v1[1], [0.0, 0.]),
-                (v2[0], v2[1], [1.0, 0.]),
-                (v3[0], v3[1], [0.0, 1.]),
-            ]);
+            vertices.append(&mut vec![v1, v2, v3]);
             if subdivs <= bottom_subdivs {
                 indices.append(&mut quad_cw_indices_off(idx_off));
             } else {
@@ -198,47 +225,54 @@ pub fn get_tile_mesh(tile_offset: TileOffset, tile: &Tile) -> Mesh {
         let y1r = (yi + 1) as f32 / greater_subdivs;
         let c0r = (yi as f32 * lesser_subdivs / greater_subdivs).round() / lesser_subdivs;
         let c1r = ((yi + 1) as f32 * lesser_subdivs / greater_subdivs).round() / lesser_subdivs;
-        let mut v1 = [[
-            x0r * TILE_WORLD_SIZE,
-            get_tile_height(x0r, y0r, height_map),
-            y0r * TILE_WORLD_SIZE,
-        ], get_tile_normal(x0r, y0r, normals)];
-        let mut v2 = [[
-            x1r * TILE_WORLD_SIZE,
-            get_tile_height(x1r, c0r, height_map),
-            c0r * TILE_WORLD_SIZE,
-        ], get_tile_normal(x1r, c0r, normals)];
-        let mut v3 = [[
-            x0r * TILE_WORLD_SIZE,
-            get_tile_height(x0r, y1r, height_map),
-            y1r * TILE_WORLD_SIZE,
-        ], get_tile_normal(x0r, y1r, normals)];
-        if c0r != c1r {
-            let mut v4 = [[
+        let mut v1 = (
+            [
+                x0r * TILE_WORLD_SIZE,
+                get_tile_height(x0r, y0r, height_map),
+                y0r * TILE_WORLD_SIZE,
+            ],
+            get_tile_normal(x0r, y0r, normals),
+            [x0r, y0r],
+        );
+        let mut v2 = (
+            [
                 x1r * TILE_WORLD_SIZE,
-                get_tile_height(x1r, c1r, height_map),
-                c1r * TILE_WORLD_SIZE,
-            ], get_tile_normal(x1r, c1r, normals)];
+                get_tile_height(x1r, c0r, height_map),
+                c0r * TILE_WORLD_SIZE,
+            ],
+            get_tile_normal(x1r, c0r, normals),
+            [x1r, c0r],
+        );
+        let mut v3 = (
+            [
+                x0r * TILE_WORLD_SIZE,
+                get_tile_height(x0r, y1r, height_map),
+                y1r * TILE_WORLD_SIZE,
+            ],
+            get_tile_normal(x0r, y1r, normals),
+            [x0r, y1r],
+        );
+        if c0r != c1r {
+            let mut v4 = (
+                [
+                    x1r * TILE_WORLD_SIZE,
+                    get_tile_height(x1r, c1r, height_map),
+                    c1r * TILE_WORLD_SIZE,
+                ],
+                get_tile_normal(x1r, c1r, normals),
+                [x1r, c1r],
+            );
             // we swap the here to keep the quads consistent
             // only swap if we swapped the x positions previous
             if subdivs <= right_subdivs {
                 swap(&mut v1, &mut v2);
                 swap(&mut v3, &mut v4);
             }
-            vertices.append(&mut vec![
-                (v1[0], v1[1], [0.0, 0.]),
-                (v2[0], v2[1], [1.0, 0.]),
-                (v3[0], v3[1], [0.0, 1.]),
-                (v4[0], v4[1], [1.0, 1.]),
-            ]);
+            vertices.append(&mut vec![v1, v2, v3, v4]);
             indices.append(&mut quad_cc_indices_off(idx_off));
             idx_off += 4;
         } else {
-            vertices.append(&mut vec![
-                (v1[0], v1[1], [0.0, 0.]),
-                (v2[0], v2[1], [1.0, 0.]),
-                (v3[0], v3[1], [0.0, 1.]),
-            ]);
+            vertices.append(&mut vec![v1, v2, v3]);
             if subdivs <= right_subdivs {
                 indices.append(&mut quad_cw_indices_off(idx_off));
             } else {
@@ -273,10 +307,10 @@ pub fn get_tile_mesh(tile_offset: TileOffset, tile: &Tile) -> Mesh {
         TILE_WORLD_SIZE,
     ];
     vertices.append(&mut vec![
-        (v1, get_tile_normal(v1r, v1r, normals), [0.0, 0.]),
-        (v2, get_tile_normal(1., left_r, normals), [1.0, 0.]),
-        (v3, get_tile_normal(bottom_r, 1., normals), [0.0, 1.]),
-        (v4, get_tile_normal(1., 1., normals), [1.0, 1.]),
+        (v1, get_tile_normal(v1r, v1r, normals), [v1r, v1r]),
+        (v2, get_tile_normal(1., left_r, normals), [1., left_r]),
+        (v3, get_tile_normal(bottom_r, 1., normals), [bottom_r, 1.]),
+        (v4, get_tile_normal(1., 1., normals), [1., 1.]),
     ]);
     indices.append(&mut quad_cc_indices_off(idx_off));
 
@@ -295,7 +329,6 @@ pub fn get_tile_mesh(tile_offset: TileOffset, tile: &Tile) -> Mesh {
     let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-    // mesh.compute_flat_normals();
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
     mesh.set_indices(Some(Indices::U32(indices)));
     // mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);

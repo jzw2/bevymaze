@@ -1,4 +1,4 @@
-use crate::util::lin_map;
+use crate::util::{lin_map, smooth_maximum_unit};
 use bevy::math::Vec3;
 use itertools::iproduct;
 use noise::utils::NoiseImage;
@@ -6,17 +6,17 @@ use noise::{NoiseFn, Perlin, Simplex};
 use qoi::{decode_to_vec, encode_to_vec, Encoder};
 use std::cmp::max;
 
-const TILE_RESOLUTION: usize = 256usize;
+pub const TILE_RESOLUTION: usize = 256usize;
 pub const TILE_SIZE: f64 = 1000.;
 const HEIGHT_SCALING: f64 = 1.;
 const MOUNTAIN_HEIGHT_OFFSET: f64 = 128. * 10.;
 const MOUNTAIN_BIG_AMP: f64 = 90. * 10.;
 const MOUNTAIN_SMALL_AMP: f64 = 5. * 10.;
 const MOUNTAIN_MICRO_AMP: f64 = 20.;
-pub const MAX_HEIGHT: f64 =
-    HEIGHT_SCALING * (MOUNTAIN_HEIGHT_OFFSET + MOUNTAIN_BIG_AMP + MOUNTAIN_SMALL_AMP + MOUNTAIN_MICRO_AMP);
-const FOOTHILL_START: f64 = 10.*TILE_SIZE;
-const MOUNTAIN_OFFSET: f64 = MAX_HEIGHT*1.1;
+pub const MAX_HEIGHT: f64 = HEIGHT_SCALING
+    * (MOUNTAIN_HEIGHT_OFFSET + MOUNTAIN_BIG_AMP + MOUNTAIN_SMALL_AMP + MOUNTAIN_MICRO_AMP);
+const FOOTHILL_START: f64 = 10. * TILE_SIZE;
+const MOUNTAIN_OFFSET: f64 = MAX_HEIGHT * 1.1;
 
 pub type HeightMap = Vec<[f32; TILE_RESOLUTION]>;
 pub type TerrainNormals = Vec<[Vec3; TILE_RESOLUTION]>;
@@ -42,7 +42,7 @@ impl TerrainGenerator {
 
         let freq1 = 0.02f64;
         let freq2 = 12.0 * freq1;
-        let freq3 = 4. * freq2;
+        let freq3 = freq2;
 
         let amp1 = MOUNTAIN_BIG_AMP;
         let amp2 = MOUNTAIN_SMALL_AMP;
@@ -56,17 +56,17 @@ impl TerrainGenerator {
     }
 
     fn get_valley_height_for(&self, x: f64, y: f64) -> f64 {
-        let scale = 0.5;
+        let scale = 1.;
         let freq1 = 0.015;
         let freq2 = 0.03;
 
-        let amp1 = 10.;
-        let amp2 = 1.;
-        return (self.valley_noise_generators[0].get([x * scale * freq1, y * scale * freq1])
-            * amp1 - 3.)
-            .max(
-                self.valley_noise_generators[1].get([x * scale * freq2, y * scale * freq2]) * amp2,
-            );
+        let amp1 = 20.;
+        let amp2 = 5.;
+        return smooth_maximum_unit(
+            self.valley_noise_generators[0].get([x * scale * freq1, y * scale * freq1]) * amp1 - 3.,
+            self.valley_noise_generators[1].get([x * scale * freq2, y * scale * freq2]) * amp2,
+            2.,
+        );
     }
 
     fn get_height_for_unscaled(&self, x: f64, y: f64) -> f64 {
