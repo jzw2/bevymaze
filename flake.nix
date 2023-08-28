@@ -13,14 +13,16 @@
       in
       {
         defaultPackage = naersk-lib.buildPackage ./.;
-        devShell = with pkgs; mkShell {
-          buildInputs = [
-            cargo rustc rustfmt pre-commit rustPackages.clippy
-            alsa-lib
-            pkg-config
-            udev
-          ];
-          RUST_SRC_PATH = rustPlatform.rustLibSrc;
+        devShell = with pkgs; mkShell rec {
+nativeBuildInputs = [
+    pkg-config
+  ];
+  buildInputs = [
+    udev alsa-lib vulkan-loader
+    xorg.libX11 xorg.libXcursor xorg.libXi xorg.libXrandr # To use the x11 feature
+    libxkbcommon wayland # To use the wayland feature
+  ];
+  LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
         };
       });
 }
