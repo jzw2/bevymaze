@@ -3487,6 +3487,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bytemuck",
+ "bytes",
  "fixed",
  "image",
  "itertools 0.11.0",
