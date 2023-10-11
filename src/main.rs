@@ -5,6 +5,7 @@ mod maze_render;
 mod render;
 mod terrain_render;
 mod test_render;
+mod tree_render;
 
 use crate::maze_gen::{
     populate_maze, CircleMaze, CircleMazeComponent, CircleNode, Maze, SquareMaze,
@@ -13,22 +14,32 @@ use crate::maze_gen::{
 use crate::maze_render::{
     get_arc_mesh, get_segment_mesh, polar_to_cart, Arc, Circle, GetWall, Segment,
 };
-use crate::terrain_render::{get_scaled_normal_map, get_tile_dist, get_tile_mesh, TILE_WORLD_SIZE};
+use crate::render::SimpleVertex;
+use crate::terrain_render::{
+    create_lattice_plane, get_scaled_normal_map, get_terrain_mesh, get_tile_dist,
+    transform_lattice_positions, update_terrain_mesh, TILE_WORLD_SIZE, VIEW_DISTANCE,
+};
 use crate::test_render::{
     draw_circle, draw_segment, to_canvas_space, AxisTransform, DrawableCircle, DrawableSegment,
 };
+use crate::tree_render::get_tree_mesh;
 use bevy::app::RunFixedUpdateLoop;
+use bevy::asset::load_internal_asset;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::math::Vec3;
 use bevy::pbr::wireframe::{WireframeConfig, WireframePlugin};
-use bevy::pbr::MaterialPipeline;
+use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
 use bevy::reflect::{TypePath, TypeUuid};
 use bevy::render::camera::Projection;
-use bevy::render::mesh::VertexAttributeValues;
+use bevy::render::mesh::{
+    Indices, MeshVertexBufferLayout, PrimitiveTopology, VertexAttributeValues,
+};
+use bevy::render::render_asset::RenderAsset;
 use bevy::render::render_resource::{
-    AddressMode, AsBindGroup, Extent3d, FilterMode, SamplerDescriptor, ShaderRef,
+    AddressMode, AsBindGroup, Extent3d, FilterMode, RenderPipelineDescriptor, SamplerDescriptor,
+    ShaderRef, SpecializedMeshPipelineError,
 };
 use bevy::render::settings::{WgpuFeatures, WgpuSettings};
 use bevy::render::texture::ImageSampler::Descriptor;
@@ -43,13 +54,15 @@ use itertools::iproduct;
 use rand::{thread_rng, Rng, RngCore, SeedableRng};
 use rusttype::{Font, Scale};
 use server::terrain_gen::{
-    generate_tile, TerrainGenerator, MAX_HEIGHT, TILE_RESOLUTION, TILE_SIZE,
+    generate_tile, TerrainGenerator, MAX_HEIGHT, TILE_RESOLUTION, TILE_SIZE, VIEW_RADIUS,
 };
 use server::util::lin_map32;
 use std::f32::consts::PI;
 use std::fmt::format;
 use std::io::Cursor;
-use bevy::render::render_asset::RenderAsset;
+use bevy_rapier3d::geometry::{Collider, Restitution};
+use bevy_rapier3d::plugin::RapierPhysicsPlugin;
+use bevy_rapier3d::prelude::{NoUserData, RapierDebugRenderPlugin, RigidBody};
 
 #[derive(AsBindGroup, Debug, Clone, TypeUuid, TypePath)]
 #[uuid = "b62bb455-a72c-4b56-87bb-81e0554e234f"]
@@ -74,16 +87,29 @@ pub struct TerrainMaterial {
     cosine_max_snow_slope: f32,
     #[uniform(9)]
     cosine_max_tree_slope: f32,
-    #[texture(10)]
-    #[sampler(11)]
-    normal_texture: Option<Handle<Image>>,
+    // #[texture(10)]
+    // #[sampler(11)]
+    // normal_texture: Option<Handle<Image>>,
 }
 
 /// The Material trait is very configurable, but comes with sensible defaults for all methods.
 /// You only need to implement functions for features that need non-default behavior. See the Material api docs for details!
 impl Material for TerrainMaterial {
+    fn vertex_shader() -> ShaderRef {
+        "shaders/curvature_transform.wgsl".into()
+    }
     fn fragment_shader() -> ShaderRef {
         "shaders/terrain_color.wgsl".into()
+    }
+
+    fn specialize(
+        _pipeline: &MaterialPipeline<Self>,
+        descriptor: &mut RenderPipelineDescriptor,
+        layout: &MeshVertexBufferLayout,
+        _key: MaterialPipelineKey<Self>,
+    ) -> Result<(), SpecializedMeshPipelineError> {
+        descriptor.primitive.cull_mode = None;
+        Ok(())
     }
 }
 
@@ -183,7 +209,7 @@ fn pan_orbit_camera(
             pan_orbit.focus += translation;
         } else if scroll.abs() > 0.0 {
             any = true;
-            pan_orbit.radius -= 2. * scroll;
+            pan_orbit.radius -= 10. * scroll;
             // dont allow zoom to reach zero or you get stuck
             //pan_orbit.radius = f32::max(pan_orbit.radius, 0.05);
         }
@@ -211,7 +237,7 @@ fn get_primary_window_size(windows: &Query<&Window, With<PrimaryWindow>>) -> Vec
 
 /// Spawn a camera like this
 fn spawn_camera(mut commands: Commands) {
-    let translation = Vec3::new(0.0, 2.5, -5.0);
+    let translation = Vec3::new(0.0, 30.0, 0.0);
     let radius = translation.length();
 
     commands.spawn((
@@ -256,54 +282,73 @@ fn create_terrain(
     mut materials: ResMut<Assets<TerrainMaterial>>,
     mut images: ResMut<Assets<Image>>,
 ) {
+    // commands.spawn(PbrBundle {
+    //     mesh: meshes.add(get_tree_mesh(0)),
+    //     material: materials.add(StandardMaterial {
+    //         base_color: Color::DARK_GREEN,
+    //         double_sided: true,
+    //         cull_mode: None,
+    //         ..default()
+    //     }),
+    //     ..default()
+    // });
     let terrain_gen = TerrainGenerator::new();
-    let mut triangles = 0usize;
-    for (xi, yi) in iproduct!(-3..3, -3..3) {
-        let tile = generate_tile(&terrain_gen, xi, yi);
-        let tile_mesh = get_tile_mesh((xi, yi), &tile);
-        let normal_image = Image::from_dynamic(
-            get_scaled_normal_map(
-                DynamicImage::from(Rgb32FImage::from_fn(
-                    TILE_RESOLUTION as u32,
-                    TILE_RESOLUTION as u32,
-                    |x, y| Rgb(tile.1[x as usize][y as usize].to_array()),
-                )),
-                get_tile_dist((xi, yi), (0, 0)),
-            ),
-            true,
-        );
-        let normal_handle = images.add(normal_image);
+    let (mut verts, indices, colors) = create_lattice_plane();
+    transform_lattice_positions(&mut verts);
+    let tile_mesh = get_terrain_mesh(verts, indices, colors, &terrain_gen);
+    commands.spawn(MaterialMeshBundle {
+        mesh: meshes.add(tile_mesh),
+        material: materials.add(TerrainMaterial {
+            max_height: MAX_HEIGHT as f32,
+            grass_line: 0.15,
+            grass_color: Color::from([0.1, 0.5, 0.2, 1.]),
+            tree_line: 0.5,
+            tree_color: Color::from([0.2, 0.6, 0.25, 1.]),
+            snow_line: 0.75,
+            snow_color: Color::from([0.95, 0.95, 0.95, 1.]),
+            stone_color: Color::from([0.34, 0.34, 0.34, 1.]),
+            cosine_max_snow_slope: (45. * PI / 180.).cos(),
+            cosine_max_tree_slope: (40. * PI / 180.).cos(),
+            // normal_texture: normal_handle.into(),
+        }),
+        ..default()
+    });
+    // println!("Done all tiles, triangles is {}", triangles)
+}
 
-        triangles += tile_mesh.indices().unwrap().len() / 3;
-        commands.spawn(MaterialMeshBundle {
-            mesh: meshes.add(tile_mesh),
-            material: materials.add(TerrainMaterial {
-                max_height: MAX_HEIGHT as f32,
-                grass_line: 0.15,
-                grass_color: Color::from([0.1, 0.5, 0.2, 1.]),
-                tree_line: 0.5,
-                tree_color: Color::from([0.2, 0.6, 0.25, 1.]),
-                snow_line: 0.75,
-                snow_color: Color::from([0.95, 0.95, 0.95, 1.]),
-                stone_color: Color::from([0.34, 0.34, 0.34, 1.]),
-                cosine_max_snow_slope: (45. * PI / 180.).cos(),
-                cosine_max_tree_slope: (40. * PI / 180.).cos(),
-                normal_texture: normal_handle.into(),
-            }),
-            transform: Transform::from_xyz(
-                xi as f32 * TILE_WORLD_SIZE,
-                0.0,
-                yi as f32 * TILE_WORLD_SIZE,
-            ),
-            ..default()
-        });
-        println!("Done tile {} {}", xi, yi);
+fn setup_physics(mut commands: Commands) {
+    /* Create the ground. */
+    commands
+        .spawn(Collider::cuboid(100.0, 0.1, 100.0))
+        .insert(TransformBundle::from(Transform::from_xyz(0.0, -2.0, 0.0)));
+
+    /* Create the bouncing ball. */
+    commands
+        .spawn(RigidBody::Dynamic)
+        .insert(Collider::ball(0.5))
+        .insert(Restitution::coefficient(0.7))
+        .insert(TransformBundle::from(Transform::from_xyz(0.0, 4.0, 0.0)));
+}
+
+pub const CURVATURE_MESH_VERTEX_OUTPUT: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 128741983741982);
+
+struct CurvaturePlugin {}
+
+impl Plugin for CurvaturePlugin {
+    fn build(&self, app: &mut App) {
+        load_internal_asset!(
+            app,
+            CURVATURE_MESH_VERTEX_OUTPUT,
+            "../assets/shaders/curvature_mesh_vertex_output.wgsl",
+            Shader::from_wgsl
+        );
     }
-    println!("Done all tiles, triangles is {}", triangles)
 }
 
 fn main() {
     let _ = App::new()
+        // .insert_resource(ClearColor(Color::rgb(0., 0., 0.)))
         .insert_resource(ClearColor(Color::rgb(0.5294, 0.8078, 0.9216)))
         .add_plugins((
             DefaultPlugins.set(ImagePlugin {
@@ -321,9 +366,12 @@ fn main() {
             //         ..default()
             //     },
             // }),
-            MaterialPlugin::<TerrainMaterial>::default(),
+            MaterialPlugin::<TerrainMaterial> { ..default() },
             ShaderUtilsPlugin,
+            CurvaturePlugin {},
         ))
+        .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
+        .add_plugins(RapierDebugRenderPlugin::default())
         // .add_plugins(WireframePlugin)
         .add_systems(Startup, setup)
         .add_systems(Startup, create_terrain)

@@ -1,10 +1,10 @@
 use crate::maze_gen::{CircleMaze, CircleNode, SquareMaze, SquareNode};
+use crate::render::{quad_cc_indices, quad_cw_indices, SimpleVertices};
 use bevy::math::{Vec2, Vec3};
 use bevy::prelude::{shape, Mesh};
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use petgraph::graphmap::NodeTrait;
 use std::f64::consts::PI;
-use crate::render::{quad_cc_indices, quad_cw_indices, SimpleVertices};
 
 /// A segment with endpoints p1 and p2
 pub struct Segment {
@@ -125,8 +125,8 @@ pub fn get_segment_mesh(segment: &Segment, width: f32, height: f32) -> Mesh {
     vertices.append(&mut vec![
         (v[0], [0., -1., 0.], [0., 0.]),
         (v[1], [0., -1., 0.], [1., 0.]),
-        (v[2], [0., -1., 0.], [0., vp_len/t_width]),
-        (v[3], [0., -1., 0.], [1., vp_len/t_width]),
+        (v[2], [0., -1., 0.], [0., vp_len / t_width]),
+        (v[3], [0., -1., 0.], [1., vp_len / t_width]),
     ]);
     indices.append(&mut quad_cw_indices(cur_idx_set));
     cur_idx_set += 1;
@@ -135,8 +135,8 @@ pub fn get_segment_mesh(segment: &Segment, width: f32, height: f32) -> Mesh {
     vertices.append(&mut vec![
         (v[4], [0., 1., 0.], [0., 0.]),
         (v[5], [0., 1., 0.], [1., 0.]),
-        (v[6], [0., 1., 0.], [0., vp_len/t_width]),
-        (v[7], [0., 1., 0.], [1., vp_len/t_width]),
+        (v[6], [0., 1., 0.], [0., vp_len / t_width]),
+        (v[7], [0., 1., 0.], [1., vp_len / t_width]),
     ]);
     indices.append(&mut quad_cc_indices(cur_idx_set));
     cur_idx_set += 1;
@@ -144,9 +144,9 @@ pub fn get_segment_mesh(segment: &Segment, width: f32, height: f32) -> Mesh {
     // front
     vertices.append(&mut vec![
         (v[0], n_face_norm, [0., 0.]),
-        (v[4], n_face_norm, [0., height/t_width]),
-        (v[2], n_face_norm, [vp_len/t_width, 0.]),
-        (v[6], n_face_norm, [vp_len/t_width, height/t_width]),
+        (v[4], n_face_norm, [0., height / t_width]),
+        (v[2], n_face_norm, [vp_len / t_width, 0.]),
+        (v[6], n_face_norm, [vp_len / t_width, height / t_width]),
     ]);
     indices.append(&mut quad_cc_indices(cur_idx_set));
     cur_idx_set += 1;
@@ -154,9 +154,9 @@ pub fn get_segment_mesh(segment: &Segment, width: f32, height: f32) -> Mesh {
     // back
     vertices.append(&mut vec![
         (v[1], face_norm, [0., 0.]),
-        (v[5], face_norm, [0., height/t_width]),
-        (v[3], face_norm, [vp_len/t_width, 0.]),
-        (v[7], face_norm, [vp_len/t_width, height/t_width]),
+        (v[5], face_norm, [0., height / t_width]),
+        (v[3], face_norm, [vp_len / t_width, 0.]),
+        (v[7], face_norm, [vp_len / t_width, height / t_width]),
     ]);
     indices.append(&mut quad_cw_indices(cur_idx_set));
     cur_idx_set += 1;
@@ -165,8 +165,8 @@ pub fn get_segment_mesh(segment: &Segment, width: f32, height: f32) -> Mesh {
     vertices.append(&mut vec![
         (v[0], n_face_vp_unit, [0., 0.]),
         (v[1], n_face_vp_unit, [1., 0.]),
-        (v[4], n_face_vp_unit, [0., height/t_width]),
-        (v[5], n_face_vp_unit, [1.0, height/t_width]),
+        (v[4], n_face_vp_unit, [0., height / t_width]),
+        (v[5], n_face_vp_unit, [1.0, height / t_width]),
     ]);
     indices.append(&mut quad_cc_indices(cur_idx_set));
     cur_idx_set += 1;
@@ -175,8 +175,8 @@ pub fn get_segment_mesh(segment: &Segment, width: f32, height: f32) -> Mesh {
     vertices.append(&mut vec![
         (v[2], face_vp_unit, [0., 0.]),
         (v[3], face_vp_unit, [1., 0.]),
-        (v[6], face_vp_unit, [0., height/t_width]),
-        (v[7], face_vp_unit, [1., height/t_width]),
+        (v[6], face_vp_unit, [0., height / t_width]),
+        (v[7], face_vp_unit, [1., height / t_width]),
     ]);
     indices.append(&mut quad_cw_indices(cur_idx_set));
     cur_idx_set += 1;
@@ -493,17 +493,25 @@ impl GetWall<SquareNode> for SquareMaze {
                 let corner = (x + self.offset.0 + 1, y + self.offset.1 + 1);
                 let adjacent = (x + self.offset.0 + 1, y + self.offset.1);
                 if !self.maze.contains_edge(cur, adjacent) {
-                    meshes.push(get_segment_mesh(&Segment {
-                        p1: (adjacent.0 as f64, adjacent.1 as f64),
-                        p2: (corner.0 as f64, corner.1 as f64)
-                    }, width, height));
+                    meshes.push(get_segment_mesh(
+                        &Segment {
+                            p1: (adjacent.0 as f64, adjacent.1 as f64),
+                            p2: (corner.0 as f64, corner.1 as f64),
+                        },
+                        width,
+                        height,
+                    ));
                 }
                 let adjacent = (x + self.offset.0, y + self.offset.1 + 1);
                 if !self.maze.contains_edge(cur, adjacent) {
-                    meshes.push(get_segment_mesh(&Segment {
-                        p1: (adjacent.0 as f64, adjacent.1 as f64),
-                        p2: (corner.0 as f64, corner.1 as f64)
-                    }, width, height));
+                    meshes.push(get_segment_mesh(
+                        &Segment {
+                            p1: (adjacent.0 as f64, adjacent.1 as f64),
+                            p2: (corner.0 as f64, corner.1 as f64),
+                        },
+                        width,
+                        height,
+                    ));
                 }
             }
         }

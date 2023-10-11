@@ -12,3 +12,13 @@ pub fn smooth_maximum_unit(a: f64, b: f64, epsilon: f64) -> f64 {
     let amb = a - b;
     return (a + b + (amb * amb + epsilon).sqrt()) / 2.;
 }
+
+const D: f64 = 0.001;
+
+pub fn derivative_x(function: impl Fn(f64, f64) -> f64) -> impl Fn(f64, f64) -> f64 {
+    move |x, y| (function(x + D, y) - function(x, y)) / D
+}
+
+pub fn derivative_y(function: impl Fn(f64, f64) -> f64) -> impl Fn(f64, f64) -> f64 {
+    move |x, y| (function(x, y + D) - function(x, y)) / D
+}
