@@ -284,7 +284,7 @@ impl TerrainGenerator {
     fn get_valley_height_for(&self, x: f64, y: f64) -> f64 {
         let scale = 1.;
         let freq1 = 0.005;
-        let freq2 = 0.03;
+        let freq2 = 0.003;
 
         let amp1 = 20.;
         let amp2 = 5.;

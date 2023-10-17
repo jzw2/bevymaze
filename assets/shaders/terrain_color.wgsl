@@ -80,6 +80,7 @@ fn fragment(
     pbr.material.perceptual_roughness = 0.98;
     pbr.material.reflectance = 0.001;
     var output_color = pbr_functions::pbr(pbr);
+    output_color = pbr_functions::apply_fog(fog, output_color, in.world_position.xyz, view.world_position.xyz);
 
     return output_color;
 }
