@@ -10,6 +10,7 @@ crate-type=["lib"]
 bench = false
 
 [dependencies]
+tokio-tungstenite = "*"
 tokio = { version = "1", features = ["full"] }
 bytes = "1"
 mini-redis = "0.4"
