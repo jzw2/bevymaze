@@ -1,3 +1,5 @@
+use std::f64::consts::PI;
+
 pub fn lin_map(a: f64, b: f64, c: f64, d: f64, x: f64) -> f64 {
     return (d - c) / (b - a) * (x - a) + c;
 }
@@ -21,4 +23,30 @@ pub fn derivative_x(function: impl Fn(f64, f64) -> f64) -> impl Fn(f64, f64) -> 
 
 pub fn derivative_y(function: impl Fn(f64, f64) -> f64) -> impl Fn(f64, f64) -> f64 {
     move |x, y| (function(x, y + D) - function(x, y)) / D
+}
+
+/// Convert a polar coordinate to it's cartesian counterpart
+pub fn polar_to_cart(p: (f64, f64)) -> (f64, f64) {
+    return (p.0 * p.1.cos(), p.0 * p.1.sin());
+}
+
+/// Get the distance between two points
+pub fn dist(p1: (f64, f64), p2: (f64, f64)) -> f64 {
+    return origin_dist((p1.0 - p2.0, p1.1 - p2.1));
+}
+
+/// Get the distance between a point and the origin
+pub fn origin_dist(p: (f64, f64)) -> f64 {
+    return (p.0 * p.0 + p.1 * p.1).sqrt();
+}
+
+/// Get the angle that the segment between the origin and p makes with the x-axis
+/// Return value is in range from [0, 2pi)
+pub fn polar_angle(p: (f64, f64)) -> f64 {
+    return (p.1.atan2(p.0) + (2.0 * PI)).rem_euclid(2.0 * PI);
+}
+
+/// Convert a cartesian coordinate to polar
+pub fn cart_to_polar(p: (f64, f64)) -> (f64, f64) {
+    return (origin_dist(p), polar_angle(p));
 }

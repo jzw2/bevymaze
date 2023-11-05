@@ -3,30 +3,40 @@
 use std::f32::consts::PI;
 
 use crate::player_controller::{
-    control_player, mouse_look, movement_input, toggle_cursor_lock, PlayerBody, PlayerCam,
+    mouse_look, movement_input, pan_orbit_camera, toggle_cursor_lock, PanOrbitCamera, PlayerBody,
+    PlayerCam,
 };
 use crate::shaders::{CurvaturePlugin, TerrainMaterial};
-use crate::terrain_render::create_terrain_mesh;
+use crate::terrain_loader::get_chunk;
+use crate::terrain_render::{
+    create_terrain_mesh, create_terrain_normal_map, X_VIEW_DISTANCE, Z_VIEW_DISTANCE,
+};
 use bevy::app::RunFixedUpdateLoop;
 use bevy::math::Vec3;
-use bevy::pbr::wireframe::WireframePlugin;
+use bevy::pbr::wireframe::{WireframeConfig, WireframePlugin};
 use bevy::pbr::{CascadeShadowConfigBuilder, NotShadowCaster};
 use bevy::prelude::*;
-use bevy::render::render_resource::{FilterMode, SamplerDescriptor};
+use bevy::render::render_resource::{FilterMode, SamplerDescriptor, WgpuFeatures};
+use bevy::render::settings::WgpuSettings;
+use bevy::render::RenderPlugin;
 use bevy_framepace::{FramepacePlugin, FramepaceSettings, Limiter};
 use bevy_mod_wanderlust::{
     ControllerBundle, ControllerInput, ControllerPhysicsBundle, WanderlustPlugin,
 };
 use bevy_rapier3d::prelude::*;
 use bevy_shader_utils::ShaderUtilsPlugin;
+use futures_util::FutureExt;
+use server::terrain_data::TerrainTile;
 use server::terrain_gen::{TerrainGenerator, MAX_HEIGHT, TILE_SIZE};
 use server::util::lin_map;
+use tokio_tungstenite::connect_async;
 
 mod maze_gen;
 mod maze_render;
 mod player_controller;
 mod render;
 mod shaders;
+mod terrain_loader;
 mod terrain_render;
 mod test_render;
 mod tree_render;
@@ -37,6 +47,19 @@ fn spawn_player(
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
 ) {
+    // let translation = Vec3::new(0.0, 2.5, -5.0);
+    // let radius = translation.length();
+    // commands.spawn((
+    //     Camera3dBundle {
+    //         transform: Transform::from_translation(translation).looking_at(Vec3::ZERO, Vec3::Y),
+    //         ..Default::default()
+    //     },
+    //     PanOrbitCamera {
+    //         radius,
+    //         ..Default::default()
+    //     },
+    // ));
+
     let mesh = meshes.add(
         shape::Capsule {
             radius: 0.5,
@@ -88,7 +111,7 @@ fn spawn_player(
                             far: 1000.0,
                         }),
                         camera: Camera {
-                            hdr: false,
+                            hdr: true,
                             ..default()
                         },
                         ..default()
@@ -139,22 +162,26 @@ fn add_lighting(
     mut mats: ResMut<Assets<StandardMaterial>>,
     // mut wireframe_config: ResMut<WireframeConfig>,
 ) {
+    // wireframe_config.global = true;
     let cascade_shadow_config = CascadeShadowConfigBuilder {
         first_cascade_far_bound: 0.3,
         maximum_distance: 3.0,
         ..default()
     }
     .build();
-    // wireframe_config.global = true;
     commands.spawn(DirectionalLightBundle {
         directional_light: DirectionalLight {
-            illuminance: 70000.0,
+            illuminance: 90000.0,
             shadows_enabled: true,
             ..default()
         },
         cascade_shadow_config,
-        transform: Transform::from_xyz(100., 100., 0.).looking_at(Vec3::ZERO, Vec3::Y),
+        transform: Transform::from_xyz(100., 100., 100.).looking_at(Vec3::ZERO, Vec3::Y),
         ..default()
+    });
+    commands.insert_resource(AmbientLight {
+        color: Color::WHITE,
+        brightness: 0.9,
     });
 }
 
@@ -162,6 +189,7 @@ fn create_terrain(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<TerrainMaterial>>,
+    mut textures: ResMut<Assets<Image>>,
 ) {
     // commands.spawn(PbrBundle {
     //     mesh: meshes.add(get_tree_mesh(0)),
@@ -205,6 +233,10 @@ fn create_terrain(
         Vec3::new(TILE_SIZE as f32 / 2., 1., TILE_SIZE as f32 / 2.),
     ));
 
+    let normal_handle = textures.add(create_terrain_normal_map(&terrain_gen));
+
+    let x_bound = X_VIEW_DISTANCE as f64 * TILE_SIZE;
+    let z_bound = Z_VIEW_DISTANCE as f64 * TILE_SIZE;
     commands.spawn(MaterialMeshBundle {
         mesh: meshes.add(terrain_mesh),
         material: materials.add(TerrainMaterial {
@@ -218,11 +250,34 @@ fn create_terrain(
             stone_color: Color::from([0.34, 0.34, 0.34, 1.]),
             cosine_max_snow_slope: (45. * PI / 180.).cos(),
             cosine_max_tree_slope: (40. * PI / 180.).cos(),
-            // normal_texture: normal_handle.into(),
+            u_bound: x_bound as f32,
+            v_bound: z_bound as f32,
+            normal_texture: normal_handle.into(),
         }),
         ..default()
     });
 }
+
+// fn load_terrain(
+//     mut commands: Commands,
+//     mut meshes: ResMut<Assets<Mesh>>,
+//     mut materials: ResMut<Assets<TerrainMaterial>>,
+//     mut textures: ResMut<Assets<Image>>,
+// ) {
+//     // create a list of all the chunks we need to load
+//     let mut chunk_list = vec![
+//         vec![TerrainTile::from(vec![0u16; 1]); Z_VIEW_DISTANCE as usize];
+//         X_VIEW_DISTANCE as usize
+//     ];
+//     let addr = "ws://localhost:9001";
+//     let _ = connect_async(addr).then(|res| {
+//         async {
+//             let Ok((mut ws_stream, response)) = res;
+//             let chunk = get_chunk((0, 0), (0, 0), &mut ws_stream).await;
+//             // get the lattice points within this chunk
+//         }
+//     });
+// }
 
 fn main() {
     let _ = App::new()
@@ -269,6 +324,8 @@ fn main() {
         .add_systems(Startup, create_terrain)
         .add_systems(Startup, add_lighting)
         .add_systems(Startup, spawn_player)
+        // .add_systems(Startup, load_terrain)
+        // .add_systems(RunFixedUpdateLoop, pan_orbit_camera)
         .add_systems(Update, (movement_input, mouse_look, toggle_cursor_lock))
         .run();
 }

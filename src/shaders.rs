@@ -10,6 +10,8 @@ use bevy::render::render_resource::{
 pub const CURVATURE_MESH_VERTEX_OUTPUT: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 128741983741982);
 
+pub const UTIL: HandleUntyped = HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 128742342344982);
+
 pub struct CurvaturePlugin {}
 
 impl Plugin for CurvaturePlugin {
@@ -20,6 +22,7 @@ impl Plugin for CurvaturePlugin {
             "../assets/shaders/curvature_mesh_vertex_output.wgsl",
             Shader::from_wgsl
         );
+        load_internal_asset!(app, UTIL, "../assets/shaders/util.wgsl", Shader::from_wgsl);
     }
 }
 
@@ -46,9 +49,15 @@ pub struct TerrainMaterial {
     pub cosine_max_snow_slope: f32,
     #[uniform(9)]
     pub cosine_max_tree_slope: f32,
-    // #[texture(10)]
-    // #[sampler(11)]
-    // pub(crate) normal_texture: Option<Handle<Image>>,
+    // This is the linear map bounds when trying to convert to our texture space
+    // it's hard to explain, sorry
+    #[uniform(10)]
+    pub u_bound: f32,
+    #[uniform(11)]
+    pub v_bound: f32,
+    #[texture(12)]
+    #[sampler(13)]
+    pub(crate) normal_texture: Option<Handle<Image>>,
 }
 
 /// The Material trait is very configurable, but comes with sensible defaults for all methods.

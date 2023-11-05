@@ -4,6 +4,7 @@ use bevy::math::{Vec2, Vec3};
 use bevy::prelude::{shape, Mesh};
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use petgraph::graphmap::NodeTrait;
+use server::util::{cart_to_polar, dist, polar_angle, polar_to_cart};
 use std::f64::consts::PI;
 
 /// A segment with endpoints p1 and p2
@@ -32,32 +33,6 @@ pub trait GetWall<N: NodeTrait> {
 
     /// Determine if a point is in a wall
     fn is_in_wall(&self, p: (f64, f64)) -> bool;
-}
-
-/// Convert a polar coordinate to it's cartesian counterpart
-pub fn polar_to_cart(p: (f64, f64)) -> (f64, f64) {
-    return (p.0 * p.1.cos(), p.0 * p.1.sin());
-}
-
-/// Get the distance between two points
-pub fn dist(p1: (f64, f64), p2: (f64, f64)) -> f64 {
-    return origin_dist((p1.0 - p2.0, p1.1 - p2.1));
-}
-
-/// Get the distance between a point and the origin
-pub fn origin_dist(p: (f64, f64)) -> f64 {
-    return (p.0 * p.0 + p.1 * p.1).sqrt();
-}
-
-/// Get the angle that the segment between the origin and p makes with the x-axis
-/// Return value is in range from [0, 2pi)
-pub fn polar_angle(p: (f64, f64)) -> f64 {
-    return (p.1.atan2(p.0) + (2.0 * PI)).rem_euclid(2.0 * PI);
-}
-
-/// Convert a cartesian coordinate to polar
-pub fn cart_to_polar(p: (f64, f64)) -> (f64, f64) {
-    return (origin_dist(p), polar_angle(p));
 }
 
 /// Get the closest distance from a point to any point on a circle

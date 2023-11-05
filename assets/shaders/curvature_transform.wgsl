@@ -86,7 +86,7 @@ fn vertex(vertex_no_morph: Vertex) -> CuravtureMeshVertexOutput {
     if origin_dist > 1000.0 {
         // only apply our transformation at large distances, because otherwise
         // rounding errors become noticable
-        let EARTH_RAD: f32 = 6.378e+6;
+        let EARTH_RAD: f32 = (6.378e+6)/4.0;
         let theta: f32 = origin_dist / EARTH_RAD;
         let r = EARTH_RAD + out.world_position[1];
         let unrotated_pos = vec3<f32>(r * sin(theta), r * (cos(theta) - 1.0), 0.0);

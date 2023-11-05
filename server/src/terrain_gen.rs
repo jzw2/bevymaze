@@ -20,13 +20,20 @@ pub const VIEW_RADIUS: i64 = 100;
 /// Constants explicity related to the shape of the terrain
 const HEIGHT_SCALING: f64 = 1.;
 const MOUNTAIN_HEIGHT_OFFSET: f64 = 128. * 10.;
+const MOUNTAIN_MASSIVE_AMP: f64 = 100.;
 const MOUNTAIN_BIG_AMP: f64 = 90. * 10.;
 const MOUNTAIN_SMALL_AMP: f64 = 5. * 10.;
 const MOUNTAIN_MICRO_AMP: f64 = 20.;
 pub const MAX_HEIGHT: f64 = HEIGHT_SCALING
-    * (MOUNTAIN_HEIGHT_OFFSET + MOUNTAIN_BIG_AMP + MOUNTAIN_SMALL_AMP + MOUNTAIN_MICRO_AMP);
+    * (MOUNTAIN_HEIGHT_OFFSET
+        + MOUNTAIN_BIG_AMP
+        + MOUNTAIN_SMALL_AMP
+        + MOUNTAIN_MICRO_AMP
+        + MOUNTAIN_MASSIVE_AMP);
 const FOOTHILL_START: f64 = 10. * TILE_SIZE;
 const MOUNTAIN_OFFSET: f64 = MAX_HEIGHT * 1.1;
+
+const D: f64 = 0.001;
 
 pub type HeightMap = Vec<[f64; TILE_RESOLUTION + 1]>;
 pub type TerrainNormals = Vec<[DVec3; TILE_RESOLUTION + 1]>;
@@ -249,14 +256,19 @@ pub struct Tile {
 }
 
 pub struct TerrainGenerator {
-    mountain_noise_generators: [Perlin; 3],
+    mountain_noise_generators: [Perlin; 4],
     valley_noise_generators: [Perlin; 2],
 }
 
 impl TerrainGenerator {
     pub fn new() -> Self {
         Self {
-            mountain_noise_generators: [Perlin::new(0), Perlin::new(1), Perlin::new(2)],
+            mountain_noise_generators: [
+                Perlin::new(5),
+                Perlin::new(0),
+                Perlin::new(1),
+                Perlin::new(2),
+            ],
             valley_noise_generators: [Perlin::new(3), Perlin::new(4)],
         }
     }
@@ -266,17 +278,20 @@ impl TerrainGenerator {
         let x = x * scale;
         let z = y * scale;
 
+        let freq0 = 0.001f64;
         let freq1 = 0.02f64;
         let freq2 = 12.0 * freq1;
         let freq3 = freq2;
 
+        let amp0 = MOUNTAIN_MASSIVE_AMP;
         let amp1 = MOUNTAIN_BIG_AMP;
         let amp2 = MOUNTAIN_SMALL_AMP;
         let amp3 = MOUNTAIN_MICRO_AMP;
 
-        return self.mountain_noise_generators[0].get([x * freq1, z * freq1]) * amp1 / 2.
-            + self.mountain_noise_generators[1].get([x * freq2, z * freq2]) * amp2 / 2.
-            + self.mountain_noise_generators[2].get([x * freq3, z * freq3]) * amp3 / 2.
+        return self.mountain_noise_generators[0].get([x * freq0, z * freq0]) * amp0 / 2.
+            + self.mountain_noise_generators[1].get([x * freq1, z * freq1]) * amp1 / 2.
+            + self.mountain_noise_generators[2].get([x * freq2, z * freq2]) * amp2 / 2.
+            + self.mountain_noise_generators[3].get([x * freq3, z * freq3]) * amp3 / 2.
             + (amp1 + amp2 + amp3) / 2.
             + MOUNTAIN_HEIGHT_OFFSET;
     }
@@ -320,26 +335,25 @@ impl TerrainGenerator {
     }
 
     fn get_x_partial_der_1st(&self, x: f64, y: f64) -> f64 {
-        let d = 0.001;
         let terrain_height = self.get_height_for(x, y);
-        let dx = self.get_height_for(x + d, y) - terrain_height;
-        return dx / d;
+        let dx = self.get_height_for(x + D, y) - terrain_height;
+        return dx / D;
     }
 
     fn get_y_partial_der_1st(&self, x: f64, y: f64) -> f64 {
-        let d = 0.001;
         let terrain_height = self.get_height_for(x, y);
-        let dy = self.get_height_for(x, y + d) - terrain_height;
-        return dy / d;
+        let dy = self.get_height_for(x, y + D) - terrain_height;
+        return dy / D;
     }
 
     pub fn get_normal(&self, x: f64, y: f64) -> DVec3 {
-        return DVec3::new(
-            self.get_x_partial_der_1st(x, y),
-            1.,
-            self.get_y_partial_der_1st(x, y),
-        )
-        .normalize();
+        let terrain_height = self.get_height_for(x, y);
+
+        let dx = self.get_height_for(x + D, y) - terrain_height;
+
+        let dy = self.get_height_for(x, y + D) - terrain_height;
+
+        return DVec3::new(-dx / D, 1.0, -dy / D).normalize();
     }
 
     /// The formula here is simply

@@ -1,17 +1,58 @@
-use mini_redis::{client, Result};
+use futures_util::{SinkExt, StreamExt};
+use log::*;
+use regex::Regex;
+use std::net::SocketAddr;
+use std::str::FromStr;
+use tokio::net::{TcpListener, TcpStream};
+use tokio_tungstenite::{
+    accept_async,
+    tungstenite::{Error, Result},
+};
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    // Open a connection to the mini-redis address.
-    let mut client = client::connect("127.0.0.1:6379").await?;
+async fn accept_connection(peer: SocketAddr, stream: TcpStream) {
+    if let Err(e) = handle_connection(peer, stream).await {
+        match e {
+            Error::ConnectionClosed | Error::Protocol(_) | Error::Utf8 => (),
+            err => error!("Error processing connection: {}", err),
+        }
+    }
+}
 
-    // Set the key "hello" with value "world"
-    client.set("hello", "world".into()).await?;
+async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
+    let mut ws_stream = accept_async(stream).await.expect("Failed to accept");
 
-    // Get key "hello"
-    let result = client.get("hello").await?;
+    info!("New WebSocket connection: {}", peer);
 
-    println!("got value from the server; result={:?}", result);
+    while let Some(msg) = ws_stream.next().await {
+        let msg = msg?;
+        if msg.is_text() {
+            let text = msg.into_text()?;
+            let reg = Regex::new(r"([0-9]+),([0-9]+):([0-9]+)").unwrap();
+            let matched = reg.captures(text.as_str()).unwrap();
+            let (_, [chunk_x, chunk_z, lod]) = matched.extract();
+            let chunk_x = i64::from_str(chunk_x).unwrap();
+            let chunk_z = i64::from_str(chunk_z).unwrap();
+            let lod = i64::from_str(lod).unwrap();
+        }
+    }
 
     Ok(())
+}
+
+#[tokio::main]
+async fn main() {
+    env_logger::init();
+
+    let addr = "127.0.0.1:9002";
+    let listener = TcpListener::bind(&addr).await.expect("Can't listen");
+    info!("Listening on: {}", addr);
+
+    while let Ok((stream, _)) = listener.accept().await {
+        let peer = stream
+            .peer_addr()
+            .expect("connected streams should have a peer address");
+        info!("Peer address: {}", peer);
+
+        tokio::spawn(accept_connection(peer, stream));
+    }
 }

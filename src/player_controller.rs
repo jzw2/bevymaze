@@ -1,4 +1,3 @@
-use std::f32::consts::FRAC_2_PI;
 use bevy::core_pipeline::fxaa::Sensitivity;
 use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::math::DVec3;
@@ -6,6 +5,7 @@ use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, PrimaryWindow};
 use bevy_mod_wanderlust::ControllerInput;
 use bevy_rapier3d::prelude::*;
+use std::f32::consts::FRAC_2_PI;
 
 #[derive(Component, Default, Reflect)]
 #[reflect(Component)]
@@ -113,77 +113,6 @@ impl Default for PanOrbitCamera {
             radius: 5.0,
             upside_down: false,
         }
-    }
-}
-
-pub fn control_player(
-    mut controllers: Query<&mut KinematicCharacterController>,
-    windows: Query<&Window, With<PrimaryWindow>>,
-    mut ev_motion: EventReader<MouseMotion>,
-    mut ev_scroll: EventReader<MouseWheel>,
-    input_mouse: Res<Input<MouseButton>>,
-    input_keyboard: Res<Input<KeyCode>>,
-    mut query: Query<(&mut Camera, &mut Transform)>,
-) {
-    let mut movement_vec = Vec3::ZERO;
-
-    let keys = input_keyboard.get_pressed();
-
-    for key in keys {
-        match key {
-            KeyCode::W => {
-                println!("W");
-                movement_vec += Vec3::new(1., 0., 0.);
-            },
-            KeyCode::A => {
-                println!("A");
-                movement_vec += Vec3::new(0., 0., -1.);
-            },
-            KeyCode::S => {
-                println!("S");
-                movement_vec += Vec3::new(-1., 0., 0.);
-            },
-            KeyCode::D => {
-                println!("D");
-                movement_vec += Vec3::new(0., 0., 1.);
-            },
-            _ => {
-                // nothing
-            }
-        }
-    }
-
-    for mut controller in controllers.iter_mut() {
-        controller.translation = Some(movement_vec);
-    }
-
-    // move the camera's origin with the player object and rotate with the mouse
-    // first check for mouse rotation
-    let mut rotation_move = Vec2::ZERO;
-
-    for ev in ev_motion.iter() {
-        rotation_move += ev.delta;
-    }
-
-    for (_, mut transform) in query.iter_mut() {
-        if rotation_move.length_squared() > 0.0 {
-            let window = get_primary_window_size(&windows);
-            let delta_x = rotation_move.x / window.x * std::f32::consts::PI * 2.0;
-            let delta_y = rotation_move.y / window.y * std::f32::consts::PI;
-            let yaw = Quat::from_rotation_y(-delta_x);
-            let pitch = Quat::from_rotation_x(-delta_y);
-            transform.rotation = yaw * transform.rotation; // rotate around global y axis
-            transform.rotation = transform.rotation * pitch; // rotate around local x axis
-        }
-    }
-}
-
-fn read_result_system(controllers: Query<(Entity, &KinematicCharacterControllerOutput)>) {
-    for (entity, output) in controllers.iter() {
-        println!(
-            "Entity {:?} moved by {:?} and touches the ground: {:?}",
-            entity, output.effective_translation, output.grounded
-        );
     }
 }
 

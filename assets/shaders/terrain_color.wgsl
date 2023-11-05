@@ -19,6 +19,8 @@
 
 #import bevy_shader_utils::perlin_noise_2d perlin_noise_2d
 
+#import bevymaze::util lin_map
+
 @group(1) @binding(0)
 var<uniform> max_height: f32;
 @group(1) @binding(1)
@@ -39,10 +41,14 @@ var<uniform> stone_color: vec4<f32>;
 var<uniform> cosine_max_snow_slope: f32;
 @group(1) @binding(9)
 var<uniform> cosine_max_tree_slope: f32;
-//@group(1) @binding(10)
-//var normal_texture: texture_2d<f32>;
-//@group(1) @binding(11)
-//var normal_sampler: sampler;
+@group(1) @binding(10)
+var<uniform> u_bound: f32;
+@group(1) @binding(11)
+var<uniform> v_bound: f32;
+@group(1) @binding(12)
+var normal_texture: texture_2d<f32>;
+@group(1) @binding(13)
+var normal_sampler: sampler;
 
 @fragment
 fn fragment(
@@ -52,10 +58,28 @@ fn fragment(
     pbr.frag_coord = in.position;
     pbr.world_position = in.world_position;
 
-//    let n_vec4 = textureSample(normal_texture, normal_sampler, in.uv);
-//    let normal = vec3(n_vec4[0], n_vec4[1], n_vec4[2]);
+    // The UV is simply the x/z components of our vert
+    // Take this and map to the unnormalized position in ellipse space
+    // Do the polar arsinh transform
+    // Get the polar
+    var uv = in.uv;
+//    let r = sqrt(uv[0]*uv[0] + uv[1]*uv[1]);
+//    let theta = atan2(uv[1], uv[0]);
+//    // arsinh the magnitude and revert back to cart
+//    uv[0] = asinh(r) * cos(theta);
+//    uv[1] = asinh(r) * sin(theta);
+    // Now do a linear transform to get to texture space
+    uv[0] = lin_map(-u_bound, u_bound, 0.0, 1.0, uv[0]);
+    uv[1] = lin_map(-v_bound, v_bound, 0.0, 1.0, uv[1]);
+    // finally we can get the normal
+    let n_vec4 = textureSample(normal_texture, normal_sampler, uv);
+    // we have to remember that the normal is compressed!
+    let x = n_vec4[0];
+    let z = n_vec4[1];
+    let normal = vec3<f32>(x, sqrt(1.0 - x*x - z*z), z);
 //    let normal = in.world_normal;
-    pbr.world_normal = in.world_normal;
+//    pbr.world_normal = in.world_normal;
+    pbr.world_normal = normal;
     pbr.N = pbr.world_normal;
     pbr.V = pbr_functions::calculate_view(in.world_position, false);
 
