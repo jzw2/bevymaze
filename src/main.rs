@@ -8,9 +8,7 @@ use crate::player_controller::{
 };
 use crate::shaders::{CurvaturePlugin, TerrainMaterial};
 use crate::terrain_loader::get_chunk;
-use crate::terrain_render::{
-    create_terrain_mesh, create_terrain_normal_map, X_VIEW_DISTANCE, Z_VIEW_DISTANCE,
-};
+use crate::terrain_render::{create_terrain_mesh, create_terrain_normal_map, load_terrain_mesh, X_VIEW_DIST_M, X_VIEW_DISTANCE, Z_VIEW_DIST_M, Z_VIEW_DISTANCE};
 use bevy::app::RunFixedUpdateLoop;
 use bevy::math::Vec3;
 use bevy::pbr::wireframe::{WireframeConfig, WireframePlugin};
@@ -19,17 +17,20 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{FilterMode, SamplerDescriptor, WgpuFeatures};
 use bevy::render::settings::WgpuSettings;
 use bevy::render::RenderPlugin;
+use bevy_atmosphere::prelude::*;
 use bevy_framepace::{FramepacePlugin, FramepaceSettings, Limiter};
 use bevy_mod_wanderlust::{
     ControllerBundle, ControllerInput, ControllerPhysicsBundle, WanderlustPlugin,
 };
 use bevy_rapier3d::prelude::*;
 use bevy_shader_utils::ShaderUtilsPlugin;
-use futures_util::FutureExt;
+use futures_util::{FutureExt, pin_mut, StreamExt};
 use server::terrain_data::TerrainTile;
 use server::terrain_gen::{TerrainGenerator, MAX_HEIGHT, TILE_SIZE};
 use server::util::lin_map;
-use tokio_tungstenite::connect_async;
+use tokio_tungstenite::{connect_async, connect_async_with_config};
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
+use url::Url;
 
 mod maze_gen;
 mod maze_render;
@@ -94,11 +95,11 @@ fn spawn_player(
             Name::from("Player"),
             PlayerBody,
         ))
-        .insert(PbrBundle {
-            mesh,
-            material: material.clone(),
-            ..default()
-        })
+        // .insert(PbrBundle {
+        //     mesh,
+        //     material: material.clone(),
+        //     ..default()
+        // })
         .with_children(|commands| {
             commands
                 .spawn((
@@ -107,25 +108,26 @@ fn spawn_player(
                         projection: Projection::Perspective(PerspectiveProjection {
                             fov: 85.0 * (PI / 180.0),
                             aspect_ratio: 1.0,
-                            near: 0.1,
-                            far: 1000.0,
+                            near: 0.1 * 3.0,
+                            far: 200.0 * 1000.0,
                         }),
                         camera: Camera {
-                            hdr: true,
+                            // hdr: true,
                             ..default()
                         },
                         ..default()
                     },
-                    FogSettings {
-                        color: Color::rgba(0.1, 0.2, 0.4, 1.0),
-                        directional_light_color: Color::rgba(1.0, 0.95, 0.75, 0.9),
-                        directional_light_exponent: 60.0,
-                        falloff: FogFalloff::from_visibility_colors(
-                            100.0 * 1000.0, // distance in world units up to which objects retain visibility (>= 5% contrast)
-                            Color::rgb(0., 0.8, 1.0), // atmospheric extinction color (after light is lost due to absorption by atmospheric particles)
-                            Color::rgba(0., 0.8, 1.0, 1.0), // atmospheric inscattering color (light gained due to scattering from the sun)
-                        ),
-                    },
+                    AtmosphereCamera::default(),
+                    // FogSettings {
+                    //     color: Color::rgba(0.1, 0.2, 0.4, 1.0),
+                    //     directional_light_color: Color::rgba(1.0, 0.95, 0.75, 0.9),
+                    //     directional_light_exponent: 60.0,
+                    //     falloff: FogFalloff::from_visibility_colors(
+                    //         100.0 * 1000.0, // distance in world units up to which objects retain visibility (>= 5% contrast)
+                    //         Color::rgb(0., 0.8, 1.0), // atmospheric extinction color (after light is lost due to absorption by atmospheric particles)
+                    //         Color::rgba(0., 0.8, 1.0, 1.0), // atmospheric inscattering color (light gained due to scattering from the sun)
+                    //     ),
+                    // },
                     PlayerCam,
                 ))
                 .with_children(|commands| {
@@ -138,21 +140,6 @@ fn spawn_player(
                     });
                 });
         });
-    // Sky
-    commands.spawn((
-        PbrBundle {
-            mesh: meshes.add(Mesh::from(shape::Box::default())),
-            material: mats.add(StandardMaterial {
-                base_color: Color::rgb(0., 0.8, 1.0),
-                unlit: true,
-                cull_mode: None,
-                ..default()
-            }),
-            transform: Transform::from_scale(Vec3::splat(200. * 1000.)),
-            ..default()
-        },
-        NotShadowCaster,
-    ));
 }
 
 /// set up a simple 3D scene
@@ -179,9 +166,14 @@ fn add_lighting(
         transform: Transform::from_xyz(100., 100., 100.).looking_at(Vec3::ZERO, Vec3::Y),
         ..default()
     });
+    commands.insert_resource(ClearColor(Color::rgb(0., 0.8, 1.0)));
+    commands.insert_resource(AtmosphereModel::new(Nishita {
+        sun_intensity: 25.0,
+        ..default()
+    }));
     commands.insert_resource(AmbientLight {
         color: Color::WHITE,
-        brightness: 0.9,
+        brightness: 1.1,
     });
 }
 
@@ -202,7 +194,7 @@ fn create_terrain(
     //     ..default()
     // });
     let terrain_gen = TerrainGenerator::new();
-    let terrain_mesh = create_terrain_mesh(&terrain_gen);
+    // let terrain_mesh = create_terrain_mesh(&terrain_gen);
 
     let mut heights: Vec<Real> = vec![];
     let dims = 100 / 2;
@@ -233,58 +225,135 @@ fn create_terrain(
         Vec3::new(TILE_SIZE as f32 / 2., 1., TILE_SIZE as f32 / 2.),
     ));
 
-    let normal_handle = textures.add(create_terrain_normal_map(&terrain_gen));
-
-    let x_bound = X_VIEW_DISTANCE as f64 * TILE_SIZE;
-    let z_bound = Z_VIEW_DISTANCE as f64 * TILE_SIZE;
-    commands.spawn(MaterialMeshBundle {
-        mesh: meshes.add(terrain_mesh),
-        material: materials.add(TerrainMaterial {
-            max_height: MAX_HEIGHT as f32,
-            grass_line: 0.15,
-            grass_color: Color::from([0.1, 0.5, 0.2, 1.]),
-            tree_line: 0.5,
-            tree_color: Color::from([0.2, 0.6, 0.25, 1.]),
-            snow_line: 0.75,
-            snow_color: Color::from([0.95, 0.95, 0.95, 1.]),
-            stone_color: Color::from([0.34, 0.34, 0.34, 1.]),
-            cosine_max_snow_slope: (45. * PI / 180.).cos(),
-            cosine_max_tree_slope: (40. * PI / 180.).cos(),
-            u_bound: x_bound as f32,
-            v_bound: z_bound as f32,
-            normal_texture: normal_handle.into(),
-        }),
-        ..default()
-    });
+    // let normal_handle = textures.add(create_terrain_normal_map(&terrain_gen));
+    //
+    // let x_bound = X_VIEW_DISTANCE as f64 * TILE_SIZE;
+    // let z_bound = Z_VIEW_DISTANCE as f64 * TILE_SIZE;
+    // commands.spawn(MaterialMeshBundle {
+    //     mesh: meshes.add(terrain_mesh),
+    //     material: materials.add(TerrainMaterial {
+    //         max_height: MAX_HEIGHT as f32,
+    //         grass_line: 0.15,
+    //         grass_color: Color::from([0.1, 0.5, 0.2, 1.]),
+    //         tree_line: 0.5,
+    //         tree_color: Color::from([0.2, 0.6, 0.25, 1.]),
+    //         snow_line: 0.75,
+    //         snow_color: Color::from([0.95, 0.95, 0.95, 1.]),
+    //         stone_color: Color::from([0.34, 0.34, 0.34, 1.]),
+    //         cosine_max_snow_slope: (45. * PI / 180.).cos(),
+    //         cosine_max_tree_slope: (40. * PI / 180.).cos(),
+    //         u_bound: x_bound as f32,
+    //         v_bound: z_bound as f32,
+    //         normal_texture: normal_handle.into(),
+    //     }),
+    //     ..default()
+    // });
 }
 
-// fn load_terrain(
-//     mut commands: Commands,
-//     mut meshes: ResMut<Assets<Mesh>>,
-//     mut materials: ResMut<Assets<TerrainMaterial>>,
-//     mut textures: ResMut<Assets<Image>>,
-// ) {
-//     // create a list of all the chunks we need to load
-//     let mut chunk_list = vec![
-//         vec![TerrainTile::from(vec![0u16; 1]); Z_VIEW_DISTANCE as usize];
-//         X_VIEW_DISTANCE as usize
-//     ];
-//     let addr = "ws://localhost:9001";
-//     let _ = connect_async(addr).then(|res| {
-//         async {
-//             let Ok((mut ws_stream, response)) = res;
-//             let chunk = get_chunk((0, 0), (0, 0), &mut ws_stream).await;
-//             // get the lattice points within this chunk
-//         }
-//     });
-// }
+fn load_terrain(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<TerrainMaterial>>,
+    mut textures: ResMut<Assets<Image>>,
+) {
+    println!("Load terrain start");
+    /// Rust tells me this won't run unless I await it or whatever but I can't since load_terrain is async
+    async {
+        let res = connect_async(Url::parse("ws://127.0.0.1:9002").expect("Can't connect to case count URL")).await;
+        println!("Try connect 2");
+        // let mut mesh_handle: Option<Handle<Mesh>> = None;
+        // let mut mesh_id: Option<
+        if let Ok((mut ws_stream, response)) = res {
+            let terrain_mesh_stream = load_terrain_mesh(&mut ws_stream);
+            pin_mut!(terrain_mesh_stream);
+            let terrain_gen = TerrainGenerator::new();
+            let normal_handle = textures.add(create_terrain_normal_map(&terrain_gen));
+            while let Some(mesh) = terrain_mesh_stream.next().await {
+                // kick the old one out and replace it
+                // if let Some(prev_handle) = mesh_handle {
+                //     meshes.remove(prev_handle);
+                //     // commands.entity()
+                // }
+                // mesh_handle = Some(meshes.add(mesh));
+
+                commands.spawn(MaterialMeshBundle {
+                    mesh: meshes.add(mesh),
+                    material: materials.add(TerrainMaterial {
+                        max_height: MAX_HEIGHT as f32,
+                        grass_line: 0.15,
+                        grass_color: Color::from([0.1, 0.5, 0.2, 1.]),
+                        tree_line: 0.5,
+                        tree_color: Color::from([0.2, 0.6, 0.25, 1.]),
+                        snow_line: 0.75,
+                        snow_color: Color::from([0.95, 0.95, 0.95, 1.]),
+                        stone_color: Color::from([0.34, 0.34, 0.34, 1.]),
+                        cosine_max_snow_slope: (45. * PI / 180.).cos(),
+                        cosine_max_tree_slope: (40. * PI / 180.).cos(),
+                        u_bound: X_VIEW_DIST_M as f32,
+                        v_bound: Z_VIEW_DIST_M as f32,
+                        normal_texture: normal_handle.clone().into(),
+                    }),
+                    ..default()
+                });
+            }
+        } else {
+            println!("Fail");
+        }
+    };
+
+    return;
+    // let addr = "ws://127.0.0.1:9002";
+    // let _ = connect_async(Url::parse("ws://127.0.0.1:9002").expect("Can't connect to case count URL")).then(|res| {
+    //     println!("Try connect 1");
+    //     async {
+    //         println!("Try connect 2");
+    //         // let mut mesh_handle: Option<Handle<Mesh>> = None;
+    //         // let mut mesh_id: Option<
+    //         if let Ok((mut ws_stream, response)) = res {
+    //             let terrain_mesh_stream = load_terrain_mesh(&mut ws_stream);
+    //             pin_mut!(terrain_mesh_stream);
+    //             let terrain_gen = TerrainGenerator::new();
+    //             let normal_handle = textures.add(create_terrain_normal_map(&terrain_gen));
+    //             while let Some(mesh) = terrain_mesh_stream.next().await {
+    //                 // kick the old one out and replace it
+    //                 // if let Some(prev_handle) = mesh_handle {
+    //                 //     meshes.remove(prev_handle);
+    //                 //     // commands.entity()
+    //                 // }
+    //                 // mesh_handle = Some(meshes.add(mesh));
+    //
+    //                 commands.spawn(MaterialMeshBundle {
+    //                     mesh: meshes.add(mesh),
+    //                     material: materials.add(TerrainMaterial {
+    //                         max_height: MAX_HEIGHT as f32,
+    //                         grass_line: 0.15,
+    //                         grass_color: Color::from([0.1, 0.5, 0.2, 1.]),
+    //                         tree_line: 0.5,
+    //                         tree_color: Color::from([0.2, 0.6, 0.25, 1.]),
+    //                         snow_line: 0.75,
+    //                         snow_color: Color::from([0.95, 0.95, 0.95, 1.]),
+    //                         stone_color: Color::from([0.34, 0.34, 0.34, 1.]),
+    //                         cosine_max_snow_slope: (45. * PI / 180.).cos(),
+    //                         cosine_max_tree_slope: (40. * PI / 180.).cos(),
+    //                         u_bound: X_VIEW_DIST_M as f32,
+    //                         v_bound: Z_VIEW_DIST_M as f32,
+    //                         normal_texture: normal_handle.clone().into(),
+    //                     }),
+    //                     ..default()
+    //                 });
+    //             }
+    //         } else {
+    //             println!("Fail");
+    //         }
+    //     }
+    // });
+}
 
 fn main() {
     let _ = App::new()
         // .insert_resource(ClearColor(Color::rgb(0., 0., 0.)))
         // the sky color
         // .insert_resource(ClearColor(Color::rgb(0.5294, 0.8078, 0.9216)))
-        .insert_resource(ClearColor(Color::rgb(0., 0.8, 1.0)))
         .add_plugins((
             DefaultPlugins.set(ImagePlugin {
                 default_sampler: SamplerDescriptor {
@@ -307,6 +376,7 @@ fn main() {
             aether_spyglass::SpyglassPlugin,
             FramepacePlugin,
         ))
+        .add_plugins(AtmospherePlugin)
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
         .add_plugins(WanderlustPlugin)
         .insert_resource(RapierConfiguration {
@@ -324,7 +394,7 @@ fn main() {
         .add_systems(Startup, create_terrain)
         .add_systems(Startup, add_lighting)
         .add_systems(Startup, spawn_player)
-        // .add_systems(Startup, load_terrain)
+        .add_systems(Startup, load_terrain)
         // .add_systems(RunFixedUpdateLoop, pan_orbit_camera)
         .add_systems(Update, (movement_input, mouse_look, toggle_cursor_lock))
         .run();

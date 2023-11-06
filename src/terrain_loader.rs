@@ -46,7 +46,7 @@ async fn run_test(case: u32) -> Result<()> {
 /// We get the height of the terrain at a certain point based off of the LOD
 /// We use bilinear filtering
 /// We calculate the appropriate LOD based off the density for a particular section
-async fn get_height(
+pub async fn get_height(
     x: f64,
     z: f64,
     center_coords: (i32, i32),

@@ -22,6 +22,7 @@ use server::terrain_gen::{
 use server::util::{cart_to_polar, lin_map};
 
 use crate::render::CompleteVertices;
+use crate::terrain_loader::get_height;
 
 pub const TILE_WORLD_SIZE: f32 = TILE_SIZE as f32;
 type TileOffset = TilePosition;
@@ -211,13 +212,50 @@ pub fn create_terrain_mesh(generator: &TerrainGenerator) -> Mesh {
     return compose_terrain_mesh(verts, &generator);
 }
 
-pub async fn load_terrain_mesh() -> impl Stream<Item = Mesh> {
+pub fn load_terrain_mesh(socket: &mut WebSocketStream<MaybeTlsStream<TcpStream>>) -> impl Stream<Item = Mesh> {
     let mut verts = create_lattice_plane();
     transform_lattice_positions(&mut verts);
     hilbert_order_verts(&mut verts);
-    // we break the mesh down into component parts
+
     let mut tile_mesh = Mesh::new(PrimitiveTopology::TriangleList);
+
+    // The actual vertices that we will put into the mesh
+    let mut vertices: CompleteVertices = vec![];
+    let mut delauney_verts: Vec<delaunator::Point> = vec![];
+
+    // TODO: Move normals to the server
+    let generator = TerrainGenerator::new();
+
+    // we break the mesh down into component parts
+    for vertex in verts {
+        let mut new_vec = vertex.as_vec3().to_array();
+        // let height = get_height(vertex.x, vertex.z, (0, 0), socket).await;
+        // TODO: move normals to the server
+        let normal = generator
+            .get_normal(vertex.x, vertex.z)
+            .as_vec3()
+            .to_array();
+        new_vec[1] = 0.0 as f32;
+        vertices.push((new_vec, normal, [vertex.x as f32, vertex.z as f32]));
+        delauney_verts.push(delaunator::Point {
+            x: vertex.x,
+            y: vertex.z,
+        });
+    }
+    let positions: Vec<_> = vertices.iter().map(|(p, _, _)| *p).collect();
+    let normals: Vec<_> = vertices.iter().map(|(_, n, _)| *n).collect();
+    let uvs: Vec<_> = vertices.iter().map(|(_, _, uv)| *uv).collect();
+    tile_mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    tile_mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    tile_mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    let indices = triangulate(&delauney_verts)
+        .triangles
+        .iter()
+        .map(|i| *i as u32)
+        .collect();
+    tile_mesh.set_indices(Some(Indices::U32(indices)));
     return stream! {
+        // let height = get_height(vertex.x, vertex.z, (0, 0), socket).await;
         yield tile_mesh;
     }
 }

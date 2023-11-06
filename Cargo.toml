@@ -4,8 +4,6 @@ members = [
     "server"
 ]
 
-
-
 [package]
 name = "bevymaze"
 version = "0.1.0"
@@ -44,3 +42,4 @@ bevy_easings = "0.11.1"
 hilbert = "0.1.2"
 fixed = "1.24.0"
 async-stream = "0.3.5"
+bevy_atmosphere = "0.7.0"
