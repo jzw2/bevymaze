@@ -22,27 +22,6 @@ struct TileData {
     data: Vec<Vec<f64>>,
 }
 
-const AGENT: &str = "Tungstenite";
-
-async fn run_test(case: u32) -> Result<()> {
-    info!("Running test case {}", case);
-    let case_url = Url::parse(&format!(
-        "ws://localhost:9001/runCase?case={}&agent={}",
-        case, AGENT
-    ))
-    .expect("Bad testcase URL");
-
-    let (mut ws_stream, _) = connect_async(case_url).await?;
-    while let Some(msg) = ws_stream.next().await {
-        let msg = msg?;
-        if msg.is_text() || msg.is_binary() {
-            ws_stream.send(msg).await?;
-        }
-    }
-
-    Ok(())
-}
-
 /// We get the height of the terrain at a certain point based off of the LOD
 /// We use bilinear filtering
 /// We calculate the appropriate LOD based off the density for a particular section

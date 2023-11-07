@@ -1,6 +1,7 @@
-use std::f64::consts::PI;
 use async_stream::__private::AsyncStream;
+use std::f64::consts::PI;
 
+use async_stream::stream;
 use bevy::math::{DVec3, Vec4};
 use bevy::prelude::{Image, Mesh};
 use bevy::render::mesh::{Indices, PrimitiveTopology};
@@ -9,19 +10,18 @@ use bevy::render::render_resource::{Extent3d, TextureDimension};
 use delaunator::triangulate;
 use fixed::types::extra::{U12, U13};
 use fixed::FixedI32;
+use futures_util::{pin_mut, Stream, StreamExt};
 use image::{ImageBuffer, Rgb, RgbImage};
 use rand::{thread_rng, Rng};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
-use async_stream::stream;
-use futures_util::{pin_mut, Stream, StreamExt};
 
 use server::terrain_gen::{
     HeightMap, TerrainGenerator, TerrainNormals, TilePosition, MAX_HEIGHT, TILE_SIZE,
 };
 use server::util::{cart_to_polar, lin_map};
 
-use crate::render::CompleteVertices;
+use crate::render::{CompleteVertices, SimpleVertex, VertexNormalUV};
 use crate::terrain_loader::get_height;
 
 pub const TILE_WORLD_SIZE: f32 = TILE_SIZE as f32;
@@ -152,15 +152,33 @@ pub fn hilbert_order_verts(verts: &mut Vec<DVec3>) {
     const BOUND: f64 = (1 << (31 - 1)) as f64;
     for idx in 0..verts.len() {
         let vert = verts[idx];
-        let x_idx = lin_map(-X_VIEW_DIST_M, X_VIEW_DIST_M, 0.0, BOUND, vert.x).min(BOUND).max(0.).round() as u32;
-        let y_idx = lin_map(-Z_VIEW_DIST_M, Z_VIEW_DIST_M, 0.0, BOUND, vert.z).min(BOUND).max(0.).round() as u32;
+        let x_idx = lin_map(-X_VIEW_DIST_M, X_VIEW_DIST_M, 0.0, BOUND, vert.x)
+            .min(BOUND)
+            .max(0.)
+            .round() as u32;
+        let y_idx = lin_map(-Z_VIEW_DIST_M, Z_VIEW_DIST_M, 0.0, BOUND, vert.z)
+            .min(BOUND)
+            .max(0.)
+            .round() as u32;
         hilbert_verts[idx] = hilbert::Point::new((x_idx ^ y_idx) as usize, &[x_idx, y_idx]);
     }
     hilbert::Point::hilbert_sort(&mut hilbert_verts, 32);
     for idx in 0..hilbert_verts.len() {
         let h_vert: &hilbert::Point = &hilbert_verts[idx];
-        let x: f64 = lin_map( 0.0, BOUND, -X_VIEW_DIST_M, X_VIEW_DIST_M, h_vert.get_coordinates()[0] as f64);
-        let z: f64 = lin_map( 0.0, BOUND, -Z_VIEW_DIST_M, Z_VIEW_DIST_M, h_vert.get_coordinates()[1] as f64);
+        let x: f64 = lin_map(
+            0.0,
+            BOUND,
+            -X_VIEW_DIST_M,
+            X_VIEW_DIST_M,
+            h_vert.get_coordinates()[0] as f64,
+        );
+        let z: f64 = lin_map(
+            0.0,
+            BOUND,
+            -Z_VIEW_DIST_M,
+            Z_VIEW_DIST_M,
+            h_vert.get_coordinates()[1] as f64,
+        );
         verts[idx] = DVec3::new(x, 0., z);
     }
 }
@@ -212,12 +230,12 @@ pub fn create_terrain_mesh(generator: &TerrainGenerator) -> Mesh {
     return compose_terrain_mesh(verts, &generator);
 }
 
-pub fn load_terrain_mesh(socket: &mut WebSocketStream<MaybeTlsStream<TcpStream>>) -> impl Stream<Item = Mesh> {
+pub fn create_base_terrain_mesh() -> Mesh {
     let mut verts = create_lattice_plane();
     transform_lattice_positions(&mut verts);
     hilbert_order_verts(&mut verts);
 
-    let mut tile_mesh = Mesh::new(PrimitiveTopology::TriangleList);
+    let mut terrain_mesh = Mesh::new(PrimitiveTopology::TriangleList);
 
     // The actual vertices that we will put into the mesh
     let mut vertices: CompleteVertices = vec![];
@@ -245,19 +263,29 @@ pub fn load_terrain_mesh(socket: &mut WebSocketStream<MaybeTlsStream<TcpStream>>
     let positions: Vec<_> = vertices.iter().map(|(p, _, _)| *p).collect();
     let normals: Vec<_> = vertices.iter().map(|(_, n, _)| *n).collect();
     let uvs: Vec<_> = vertices.iter().map(|(_, _, uv)| *uv).collect();
-    tile_mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    tile_mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-    tile_mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    terrain_mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    terrain_mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    terrain_mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
     let indices = triangulate(&delauney_verts)
         .triangles
         .iter()
         .map(|i| *i as u32)
         .collect();
-    tile_mesh.set_indices(Some(Indices::U32(indices)));
+    terrain_mesh.set_indices(Some(Indices::U32(indices)));
+    return terrain_mesh;
+}
+
+pub fn load_terrain_heights(
+    vertices: CompleteVertices,
+    socket: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
+) -> impl Stream<Item = (usize, VertexNormalUV)> {
     return stream! {
-        // let height = get_height(vertex.x, vertex.z, (0, 0), socket).await;
-        yield tile_mesh;
-    }
+        for idx in 0..vertices.len() {
+            let vertex = vertices[idx];
+            let vertex_height = get_height(vertex.0[0] as f64, vertex.0[2] as f64, (0, 0), socket).await as f32;
+            yield (idx, ([vertex.0[0], vertex_height, vertex.0[2]], vertex.1, vertex.2))
+        }
+    };
 }
 
 pub fn create_terrain_normal_map(generator: &TerrainGenerator) -> Image {

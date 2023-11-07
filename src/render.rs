@@ -1,6 +1,7 @@
 pub type SimpleVertex = [f32; 3];
+pub type VertexNormalUV = (SimpleVertex, [f32; 3], [f32; 2]);
 pub type SimpleVertices = Vec<SimpleVertex>;
-pub type CompleteVertices = Vec<(SimpleVertex, [f32; 3], [f32; 2])>;
+pub type CompleteVertices = Vec<VertexNormalUV>;
 pub type Indices = Vec<u32>;
 
 // get the indices of the face in clockwise order

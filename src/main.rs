@@ -8,7 +8,7 @@ use crate::player_controller::{
 };
 use crate::shaders::{CurvaturePlugin, TerrainMaterial};
 use crate::terrain_loader::get_chunk;
-use crate::terrain_render::{create_terrain_mesh, create_terrain_normal_map, load_terrain_mesh, X_VIEW_DIST_M, X_VIEW_DISTANCE, Z_VIEW_DIST_M, Z_VIEW_DISTANCE};
+use crate::terrain_render::{create_terrain_mesh, create_terrain_normal_map, load_terrain_heights, X_VIEW_DIST_M, X_VIEW_DISTANCE, Z_VIEW_DIST_M, Z_VIEW_DISTANCE};
 use bevy::app::RunFixedUpdateLoop;
 use bevy::math::Vec3;
 use bevy::pbr::wireframe::{WireframeConfig, WireframePlugin};
@@ -17,6 +17,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{FilterMode, SamplerDescriptor, WgpuFeatures};
 use bevy::render::settings::WgpuSettings;
 use bevy::render::RenderPlugin;
+use bevy::tasks::{AsyncComputeTaskPool, Task};
 use bevy_atmosphere::prelude::*;
 use bevy_framepace::{FramepacePlugin, FramepaceSettings, Limiter};
 use bevy_mod_wanderlust::{
@@ -24,7 +25,7 @@ use bevy_mod_wanderlust::{
 };
 use bevy_rapier3d::prelude::*;
 use bevy_shader_utils::ShaderUtilsPlugin;
-use futures_util::{FutureExt, pin_mut, StreamExt};
+use futures_util::{FutureExt, pin_mut, Stream, StreamExt};
 use server::terrain_data::TerrainTile;
 use server::terrain_gen::{TerrainGenerator, MAX_HEIGHT, TILE_SIZE};
 use server::util::lin_map;
@@ -250,6 +251,27 @@ fn create_terrain(
     // });
 }
 
+
+#[derive(Component)]
+struct LoadTerrain(Task<()>);
+
+fn spawn_tasks(mut commands: Commands,
+               mut meshes: ResMut<Assets<Mesh>>,
+               mut materials: ResMut<Assets<TerrainMaterial>>,
+               mut textures: ResMut<Assets<Image>>,) {
+    let thread_pool = AsyncComputeTaskPool::get();
+    // Spawn new task on the AsyncComputeTaskPool; the task will be
+    // executed in the background, and the Task future returned by
+    // spawn() can be used to poll for the result
+    let task = thread_pool.spawn(async move {
+        
+    });
+
+    // Spawn new entity and add our new task as a component
+    commands.spawn(LoadTerrain(task));
+}
+
+
 fn load_terrain(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -264,7 +286,7 @@ fn load_terrain(
         // let mut mesh_handle: Option<Handle<Mesh>> = None;
         // let mut mesh_id: Option<
         if let Ok((mut ws_stream, response)) = res {
-            let terrain_mesh_stream = load_terrain_mesh(&mut ws_stream);
+            let terrain_mesh_stream = load_terrain_heights(&mut ws_stream);
             pin_mut!(terrain_mesh_stream);
             let terrain_gen = TerrainGenerator::new();
             let normal_handle = textures.add(create_terrain_normal_map(&terrain_gen));
