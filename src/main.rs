@@ -8,12 +8,16 @@ use crate::player_controller::{
 };
 use crate::shaders::{CurvaturePlugin, TerrainMaterial};
 use crate::terrain_loader::get_chunk;
-use crate::terrain_render::{create_terrain_mesh, create_terrain_normal_map, load_terrain_heights, X_VIEW_DIST_M, X_VIEW_DISTANCE, Z_VIEW_DIST_M, Z_VIEW_DISTANCE};
+use crate::terrain_render::{
+    create_base_terrain_mesh, create_terrain_mesh, create_terrain_normal_map, load_terrain_heights,
+    X_VIEW_DISTANCE, X_VIEW_DIST_M, Z_VIEW_DISTANCE, Z_VIEW_DIST_M,
+};
 use bevy::app::RunFixedUpdateLoop;
 use bevy::math::Vec3;
 use bevy::pbr::wireframe::{WireframeConfig, WireframePlugin};
 use bevy::pbr::{CascadeShadowConfigBuilder, NotShadowCaster};
 use bevy::prelude::*;
+use bevy::render::mesh::VertexAttributeValues::{Float32x2, Float32x3};
 use bevy::render::render_resource::{FilterMode, SamplerDescriptor, WgpuFeatures};
 use bevy::render::settings::WgpuSettings;
 use bevy::render::RenderPlugin;
@@ -25,12 +29,12 @@ use bevy_mod_wanderlust::{
 };
 use bevy_rapier3d::prelude::*;
 use bevy_shader_utils::ShaderUtilsPlugin;
-use futures_util::{FutureExt, pin_mut, Stream, StreamExt};
+use futures_util::{pin_mut, FutureExt, Stream, StreamExt};
 use server::terrain_data::TerrainTile;
 use server::terrain_gen::{TerrainGenerator, MAX_HEIGHT, TILE_SIZE};
 use server::util::lin_map;
-use tokio_tungstenite::{connect_async, connect_async_with_config};
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
+use tokio_tungstenite::{connect_async, connect_async_with_config};
 use url::Url;
 
 mod maze_gen;
@@ -41,6 +45,7 @@ mod shaders;
 mod terrain_loader;
 mod terrain_render;
 mod test_render;
+mod tests;
 mod tree_render;
 
 /// Spawn the player's collider and camera
@@ -251,26 +256,24 @@ fn create_terrain(
     // });
 }
 
-
 #[derive(Component)]
 struct LoadTerrain(Task<()>);
 
-fn spawn_tasks(mut commands: Commands,
-               mut meshes: ResMut<Assets<Mesh>>,
-               mut materials: ResMut<Assets<TerrainMaterial>>,
-               mut textures: ResMut<Assets<Image>>,) {
+fn spawn_tasks(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<TerrainMaterial>>,
+    mut textures: ResMut<Assets<Image>>,
+) {
     let thread_pool = AsyncComputeTaskPool::get();
     // Spawn new task on the AsyncComputeTaskPool; the task will be
     // executed in the background, and the Task future returned by
     // spawn() can be used to poll for the result
-    let task = thread_pool.spawn(async move {
-        
-    });
+    let task = thread_pool.spawn(async move {});
 
     // Spawn new entity and add our new task as a component
     commands.spawn(LoadTerrain(task));
 }
-
 
 fn load_terrain(
     mut commands: Commands,
@@ -280,43 +283,55 @@ fn load_terrain(
 ) {
     println!("Load terrain start");
     /// Rust tells me this won't run unless I await it or whatever but I can't since load_terrain is async
+    let mesh = create_base_terrain_mesh();
+    let mut mesh_handle = meshes.add(mesh);
+    // TODO: put this on the server!
+    let normal_handle = textures.add(create_terrain_normal_map(&TerrainGenerator::new()));
+    commands.spawn(MaterialMeshBundle {
+        mesh: mesh_handle,
+        material: materials.add(TerrainMaterial {
+            max_height: MAX_HEIGHT as f32,
+            grass_line: 0.15,
+            grass_color: Color::from([0.1, 0.5, 0.2, 1.]),
+            tree_line: 0.5,
+            tree_color: Color::from([0.2, 0.6, 0.25, 1.]),
+            snow_line: 0.75,
+            snow_color: Color::from([0.95, 0.95, 0.95, 1.]),
+            stone_color: Color::from([0.34, 0.34, 0.34, 1.]),
+            cosine_max_snow_slope: (45. * PI / 180.).cos(),
+            cosine_max_tree_slope: (40. * PI / 180.).cos(),
+            u_bound: X_VIEW_DIST_M as f32,
+            v_bound: Z_VIEW_DIST_M as f32,
+            normal_texture: normal_handle.clone().into(),
+        }),
+        ..default()
+    });
+
     async {
-        let res = connect_async(Url::parse("ws://127.0.0.1:9002").expect("Can't connect to case count URL")).await;
+        let res = connect_async(
+            Url::parse("ws://127.0.0.1:9002").expect("Can't connect to case count URL"),
+        )
+        .await;
         println!("Try connect 2");
         // let mut mesh_handle: Option<Handle<Mesh>> = None;
         // let mut mesh_id: Option<
         if let Ok((mut ws_stream, response)) = res {
-            let terrain_mesh_stream = load_terrain_heights(&mut ws_stream);
-            pin_mut!(terrain_mesh_stream);
-            let terrain_gen = TerrainGenerator::new();
-            let normal_handle = textures.add(create_terrain_normal_map(&terrain_gen));
-            while let Some(mesh) = terrain_mesh_stream.next().await {
-                // kick the old one out and replace it
-                // if let Some(prev_handle) = mesh_handle {
-                //     meshes.remove(prev_handle);
-                //     // commands.entity()
-                // }
-                // mesh_handle = Some(meshes.add(mesh));
+            let Some(mesh) = meshes.get(&mut mesh_handle);
+            let Some(Float32x3(pos)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION);
+            let Some(Float32x3(norm)) = mesh.attribute(Mesh::ATTRIBUTE_NORMAL);
+            let Some(Float32x2(uv)) = mesh.attribute(Mesh::ATTRIBUTE_UV_0);
 
-                commands.spawn(MaterialMeshBundle {
-                    mesh: meshes.add(mesh),
-                    material: materials.add(TerrainMaterial {
-                        max_height: MAX_HEIGHT as f32,
-                        grass_line: 0.15,
-                        grass_color: Color::from([0.1, 0.5, 0.2, 1.]),
-                        tree_line: 0.5,
-                        tree_color: Color::from([0.2, 0.6, 0.25, 1.]),
-                        snow_line: 0.75,
-                        snow_color: Color::from([0.95, 0.95, 0.95, 1.]),
-                        stone_color: Color::from([0.34, 0.34, 0.34, 1.]),
-                        cosine_max_snow_slope: (45. * PI / 180.).cos(),
-                        cosine_max_tree_slope: (40. * PI / 180.).cos(),
-                        u_bound: X_VIEW_DIST_M as f32,
-                        v_bound: Z_VIEW_DIST_M as f32,
-                        normal_texture: normal_handle.clone().into(),
-                    }),
-                    ..default()
-                });
+            let mut complete_verts = vec![];
+            for i in 0..mesh.count_vertices() {
+                complete_verts.push((pos[i], norm[i], uv[i]));
+            }
+            let terrain_mesh_stream = load_terrain_heights(complete_verts, &mut ws_stream);
+            pin_mut!(terrain_mesh_stream);
+
+            while let Some(vtx) = terrain_mesh_stream.next().await {
+                // according to scientists this should modify the mesh in real time
+                // TODO: verify
+                pos[vtx.0][1] = vtx.1.0[1];
             }
         } else {
             println!("Fail");

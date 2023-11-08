@@ -34,6 +34,32 @@ fn as_u8_slice<T>(v: &[T]) -> &[u8] {
     }
 }
 
+/// Generates the raw u16 data for a given chunk
+/// TODO: figure out way to merge this with the code in handle connection
+/// TODO: main issue is that I don't want to run the loop twice, but I want this to be
+/// TODO: generic *shrug*
+pub fn generate_data(buffer: &mut Vec<u16>, chunk: (i32, i32)) {
+    let generator = TerrainGenerator::new();
+
+    for i in 0..DATUM_COUNT {
+        let (x, y) = idx_to_coords(i);
+        let x_world_pos = lin_map(0., TILE_DIM as f64, 0., TILE_SIZE, x as f64)
+            + TILE_SIZE * chunk.0 as f64;
+        let z_world_pos = lin_map(0., TILE_DIM as f64, 0., TILE_SIZE, y as f64)
+            + TILE_SIZE * chunk.1 as f64;
+        buffer[i] = lin_map(
+            -500.0,
+            8500.0,
+            0.0,
+            0xFFFF as f64,
+            generator.get_height_for(x_world_pos, z_world_pos),
+        )
+            .round()
+            .min(0xFFFF as f64)
+            .max(0.0) as u16;
+    }
+}
+
 async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
     let mut ws_stream = accept_async(stream).await.expect("Failed to accept");
 
@@ -51,7 +77,7 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
             let chunk_z = i64::from_str(chunk_z).unwrap();
             // the LOD is the depth of the tree. Highest is 10, representing perfect detail
             let lod = u32::from_str(lod).unwrap();
-            let data_file = format!("{chunk_x}.{chunk_z}");
+            let data_file = format!("{chunk_x}_{chunk_z}.mtd");
             // get the terrain data
             // check if the file exists
             if Path::exists(data_file.as_ref()) {
@@ -73,7 +99,7 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
                 let generator = TerrainGenerator::new();
 
                 // store it so we can reuse it later
-                let file = File::open(data_file).expect("failed to open file");
+                let file = File::create(data_file).expect("failed to open file");
                 let mut buf_writer = BufWriter::new(file);
 
                 for i in 0..DATUM_COUNT {
@@ -86,12 +112,13 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
                         -500.0,
                         8500.0,
                         0.0,
-                        (1u16 << 16) as f64,
+                        0xFFFF as f64,
                         generator.get_height_for(x_world_pos, z_world_pos),
                     )
                     .round()
-                    .min((1u16 << 16) as f64)
+                    .min(0xFFFF as f64)
                     .max(0.0) as u16;
+                    // save it for later use
                     buf_writer
                         .write_u16::<NativeEndian>(buffer[i])
                         .expect(format!("failed to write half word {i}").as_str());
