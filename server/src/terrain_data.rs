@@ -35,13 +35,15 @@ impl From<Vec<u16>> for TerrainTile {
 
 impl From<TerrainTile> for Vec<u16> {
     fn from(value: TerrainTile) -> Self {
-        return value.into();
+        let TerrainTile(vec) = value;
+        return vec;
     }
 }
 
 impl From<&TerrainTile> for Vec<u16> {
     fn from(value: &TerrainTile) -> Self {
-        return value.into();
+        let TerrainTile(vec) = value;
+        return vec.clone();
     }
 }
 
