@@ -282,13 +282,13 @@ fn load_terrain(
     mut textures: ResMut<Assets<Image>>,
 ) {
     println!("Load terrain start");
-    /// Rust tells me this won't run unless I await it or whatever but I can't since load_terrain is async
+    // Rust tells me this won't run unless I await it or whatever but I can't since load_terrain is async
     let mesh = create_base_terrain_mesh();
     let mut mesh_handle = meshes.add(mesh);
     // TODO: put this on the server!
     let normal_handle = textures.add(create_terrain_normal_map(&TerrainGenerator::new()));
     commands.spawn(MaterialMeshBundle {
-        mesh: mesh_handle,
+        mesh: mesh_handle.clone(),
         material: materials.add(TerrainMaterial {
             max_height: MAX_HEIGHT as f32,
             grass_line: 0.15,
@@ -313,25 +313,22 @@ fn load_terrain(
         )
         .await;
         println!("Try connect 2");
-        // let mut mesh_handle: Option<Handle<Mesh>> = None;
-        // let mut mesh_id: Option<
         if let Ok((mut ws_stream, response)) = res {
-            let Some(mesh) = meshes.get(&mut mesh_handle);
-            let Some(Float32x3(pos)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION);
-            let Some(Float32x3(norm)) = mesh.attribute(Mesh::ATTRIBUTE_NORMAL);
-            let Some(Float32x2(uv)) = mesh.attribute(Mesh::ATTRIBUTE_UV_0);
-
-            let mut complete_verts = vec![];
-            for i in 0..mesh.count_vertices() {
-                complete_verts.push((pos[i], norm[i], uv[i]));
+            let mesh = meshes.get_mut(&mut mesh_handle).unwrap();
+            let pos;
+            if let Some(Float32x3(p)) = mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION) {
+                pos = p;
+            } else {
+                panic!("Unexpected position attribute");
             }
-            let terrain_mesh_stream = load_terrain_heights(complete_verts, &mut ws_stream);
+
+            let terrain_mesh_stream = load_terrain_heights(pos.clone(), &mut ws_stream);
             pin_mut!(terrain_mesh_stream);
 
             while let Some(vtx) = terrain_mesh_stream.next().await {
                 // according to scientists this should modify the mesh in real time
                 // TODO: verify
-                pos[vtx.0][1] = vtx.1.0[1];
+                pos[vtx.0][1] = vtx.1[1];
             }
         } else {
             println!("Fail");
@@ -339,51 +336,6 @@ fn load_terrain(
     };
 
     return;
-    // let addr = "ws://127.0.0.1:9002";
-    // let _ = connect_async(Url::parse("ws://127.0.0.1:9002").expect("Can't connect to case count URL")).then(|res| {
-    //     println!("Try connect 1");
-    //     async {
-    //         println!("Try connect 2");
-    //         // let mut mesh_handle: Option<Handle<Mesh>> = None;
-    //         // let mut mesh_id: Option<
-    //         if let Ok((mut ws_stream, response)) = res {
-    //             let terrain_mesh_stream = load_terrain_mesh(&mut ws_stream);
-    //             pin_mut!(terrain_mesh_stream);
-    //             let terrain_gen = TerrainGenerator::new();
-    //             let normal_handle = textures.add(create_terrain_normal_map(&terrain_gen));
-    //             while let Some(mesh) = terrain_mesh_stream.next().await {
-    //                 // kick the old one out and replace it
-    //                 // if let Some(prev_handle) = mesh_handle {
-    //                 //     meshes.remove(prev_handle);
-    //                 //     // commands.entity()
-    //                 // }
-    //                 // mesh_handle = Some(meshes.add(mesh));
-    //
-    //                 commands.spawn(MaterialMeshBundle {
-    //                     mesh: meshes.add(mesh),
-    //                     material: materials.add(TerrainMaterial {
-    //                         max_height: MAX_HEIGHT as f32,
-    //                         grass_line: 0.15,
-    //                         grass_color: Color::from([0.1, 0.5, 0.2, 1.]),
-    //                         tree_line: 0.5,
-    //                         tree_color: Color::from([0.2, 0.6, 0.25, 1.]),
-    //                         snow_line: 0.75,
-    //                         snow_color: Color::from([0.95, 0.95, 0.95, 1.]),
-    //                         stone_color: Color::from([0.34, 0.34, 0.34, 1.]),
-    //                         cosine_max_snow_slope: (45. * PI / 180.).cos(),
-    //                         cosine_max_tree_slope: (40. * PI / 180.).cos(),
-    //                         u_bound: X_VIEW_DIST_M as f32,
-    //                         v_bound: Z_VIEW_DIST_M as f32,
-    //                         normal_texture: normal_handle.clone().into(),
-    //                     }),
-    //                     ..default()
-    //                 });
-    //             }
-    //         } else {
-    //             println!("Fail");
-    //         }
-    //     }
-    // });
 }
 
 fn main() {

@@ -2,7 +2,7 @@ use byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
 use futures_util::{SinkExt, StreamExt};
 use log::*;
 use regex::Regex;
-use server::terrain_data::{idx_to_coords, DATUM_COUNT, TILE_DIM};
+use server::terrain_data::{compressed_height, idx_to_coords, DATUM_COUNT, TILE_DIM};
 use server::terrain_gen::{TerrainGenerator, TILE_SIZE};
 use server::util::lin_map;
 use std::fs::{read, File};
@@ -31,32 +31,6 @@ async fn accept_connection(peer: SocketAddr, stream: TcpStream) {
 fn as_u8_slice<T>(v: &[T]) -> &[u8] {
     unsafe {
         std::slice::from_raw_parts(v.as_ptr() as *const u8, v.len() * std::mem::size_of::<T>())
-    }
-}
-
-/// Generates the raw u16 data for a given chunk
-/// TODO: figure out way to merge this with the code in handle connection
-/// TODO: main issue is that I don't want to run the loop twice, but I want this to be
-/// TODO: generic *shrug*
-pub fn generate_data(buffer: &mut Vec<u16>, chunk: (i32, i32)) {
-    let generator = TerrainGenerator::new();
-
-    for i in 0..DATUM_COUNT {
-        let (x, y) = idx_to_coords(i);
-        let x_world_pos = lin_map(0., TILE_DIM as f64, 0., TILE_SIZE, x as f64)
-            + TILE_SIZE * chunk.0 as f64;
-        let z_world_pos = lin_map(0., TILE_DIM as f64, 0., TILE_SIZE, y as f64)
-            + TILE_SIZE * chunk.1 as f64;
-        buffer[i] = lin_map(
-            -500.0,
-            8500.0,
-            0.0,
-            0xFFFF as f64,
-            generator.get_height_for(x_world_pos, z_world_pos),
-        )
-            .round()
-            .min(0xFFFF as f64)
-            .max(0.0) as u16;
     }
 }
 
@@ -108,16 +82,8 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
                         + TILE_SIZE * chunk_x as f64;
                     let z_world_pos = lin_map(0., TILE_DIM as f64, 0., TILE_SIZE, y as f64)
                         + TILE_SIZE * chunk_z as f64;
-                    buffer[i] = lin_map(
-                        -500.0,
-                        8500.0,
-                        0.0,
-                        0xFFFF as f64,
-                        generator.get_height_for(x_world_pos, z_world_pos),
-                    )
-                    .round()
-                    .min(0xFFFF as f64)
-                    .max(0.0) as u16;
+                    buffer[i] =
+                        compressed_height(generator.get_height_for(x_world_pos, z_world_pos));
                     // save it for later use
                     buf_writer
                         .write_u16::<NativeEndian>(buffer[i])

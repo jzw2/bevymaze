@@ -276,15 +276,16 @@ pub fn create_base_terrain_mesh() -> Mesh {
 }
 
 pub fn load_terrain_heights(
-    vertices: CompleteVertices,
+    vertices: Vec<[f32; 3]>,
     socket: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
-) -> impl Stream<Item = (usize, VertexNormalUV)> {
+) -> impl Stream<Item = (usize, [f32; 3])> {
     return stream! {
-        for idx in 0..vertices.len() {
-            let vertex = vertices[idx];
-            let vertex_height = get_height(vertex.0[0] as f64, vertex.0[2] as f64, (0, 0), socket).await as f32;
-            yield (idx, ([vertex.0[0], vertex_height, vertex.0[2]], vertex.1, vertex.2))
-        }
+        // for idx in 0..vertices.len() {
+        //     let vertex = vertices[idx];
+        //     let vertex_height = get_height(vertex.0[0] as f64, vertex.0[2] as f64, (0, 0), socket).await as f32;
+        //     yield (idx, ([vertex.0[0], vertex_height, vertex.0[2]], vertex.1, vertex.2))
+        // }
+        yield (0, [0., 0., 0.]);
     };
 }
 

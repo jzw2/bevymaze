@@ -78,14 +78,14 @@ impl TerrainTile {
     }
 }
 
-fn compressed_height(h: f64) -> u16 {
+pub fn compressed_height(h: f64) -> u16 {
     return lin_map(-500.0, 8500.0, 0.0, 0xFFFF as f64, h)
         .round()
         .min(0xFFFF as f64)
         .max(0.0) as u16;
 }
 
-fn uncompressed_height(h: u16) -> f64 {
+pub fn uncompressed_height(h: u16) -> f64 {
     return lin_map(0.0, 0xFFFF as f64, -500.0, 8500.0, h as f64);
 }
 

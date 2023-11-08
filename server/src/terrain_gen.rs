@@ -1,3 +1,4 @@
+use crate::terrain_data::{compressed_height, idx_to_coords, DATUM_COUNT, TILE_DIM};
 use crate::util::{lin_map, smooth_maximum_unit};
 use bevy::math::{DVec2, DVec3};
 use itertools::{iproduct, Position};
@@ -542,4 +543,21 @@ pub fn generate_tile(generator: &TerrainGenerator, tile_pos: TilePosition) -> Ti
         normal[xpixel][ypixel] = generator.get_normal(xpos, ypos);
     }
     return (raw, normal);
+}
+
+/// Generates the raw u16 data for a given chunk
+/// TODO: figure out way to merge this with the code in handle connection
+/// TODO: main issue is that I don't want to run the loop twice, but I want this to be
+/// TODO: generic *shrug*
+pub fn generate_data(buffer: &mut Vec<u16>, chunk: (i32, i32)) {
+    let generator = TerrainGenerator::new();
+
+    for i in 0..DATUM_COUNT {
+        let (x, y) = idx_to_coords(i);
+        let x_world_pos =
+            lin_map(0., TILE_DIM as f64, 0., TILE_SIZE, x as f64) + TILE_SIZE * chunk.0 as f64;
+        let z_world_pos =
+            lin_map(0., TILE_DIM as f64, 0., TILE_SIZE, y as f64) + TILE_SIZE * chunk.1 as f64;
+        buffer[i] = compressed_height(generator.get_height_for(x_world_pos, z_world_pos));
+    }
 }
