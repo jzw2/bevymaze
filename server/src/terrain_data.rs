@@ -40,20 +40,13 @@ impl From<TerrainTile> for Vec<u16> {
     }
 }
 
-impl From<&TerrainTile> for Vec<u16> {
-    fn from(value: &TerrainTile) -> Self {
-        let TerrainTile(vec) = value;
-        return vec.clone();
-    }
-}
-
 impl TerrainTile {
     /// We get the height of the terrain at a certain point based off of the LOD
     /// We use bilinear filtering
     /// We calculate the appropriate LOD based off the density for a particular section
     /// x and z are both in the range [0, TILE_SIZE]
     pub fn get_height(&self, x: f64, z: f64) -> f64 {
-        let data = Vec::<u16>::from(self);
+        let TerrainTile(data) = self;
         let dim = data.len();
         // the coordinates of the point relative to the chunk
         let x_offset = x / TILE_SIZE;
