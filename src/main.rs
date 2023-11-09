@@ -118,7 +118,6 @@ fn spawn_player(
                             far: 200.0 * 1000.0,
                         }),
                         camera: Camera {
-                            // hdr: true,
                             ..default()
                         },
                         ..default()
@@ -200,7 +199,7 @@ fn create_terrain(
     //     ..default()
     // });
     let terrain_gen = TerrainGenerator::new();
-    // let terrain_mesh = create_terrain_mesh(&terrain_gen);
+    let terrain_mesh = create_terrain_mesh(&terrain_gen);
 
     let mut heights: Vec<Real> = vec![];
     let dims = 100 / 2;
@@ -231,29 +230,28 @@ fn create_terrain(
         Vec3::new(TILE_SIZE as f32 / 2., 1., TILE_SIZE as f32 / 2.),
     ));
 
-    // let normal_handle = textures.add(create_terrain_normal_map(&terrain_gen));
-    //
-    // let x_bound = X_VIEW_DISTANCE as f64 * TILE_SIZE;
-    // let z_bound = Z_VIEW_DISTANCE as f64 * TILE_SIZE;
-    // commands.spawn(MaterialMeshBundle {
-    //     mesh: meshes.add(terrain_mesh),
-    //     material: materials.add(TerrainMaterial {
-    //         max_height: MAX_HEIGHT as f32,
-    //         grass_line: 0.15,
-    //         grass_color: Color::from([0.1, 0.5, 0.2, 1.]),
-    //         tree_line: 0.5,
-    //         tree_color: Color::from([0.2, 0.6, 0.25, 1.]),
-    //         snow_line: 0.75,
-    //         snow_color: Color::from([0.95, 0.95, 0.95, 1.]),
-    //         stone_color: Color::from([0.34, 0.34, 0.34, 1.]),
-    //         cosine_max_snow_slope: (45. * PI / 180.).cos(),
-    //         cosine_max_tree_slope: (40. * PI / 180.).cos(),
-    //         u_bound: x_bound as f32,
-    //         v_bound: z_bound as f32,
-    //         normal_texture: normal_handle.into(),
-    //     }),
-    //     ..default()
-    // });
+    let normal_handle = textures.add(create_terrain_normal_map(&terrain_gen));
+
+
+    commands.spawn(MaterialMeshBundle {
+        mesh: meshes.add(terrain_mesh),
+        material: materials.add(TerrainMaterial {
+            max_height: MAX_HEIGHT as f32,
+            grass_line: 0.15,
+            grass_color: Color::from([0.1, 0.4, 0.2, 1.]),
+            tree_line: 0.5,
+            tree_color: Color::from([0.2, 0.5, 0.25, 1.]),
+            snow_line: 0.75,
+            snow_color: Color::from([0.95, 0.95, 0.95, 1.]),
+            stone_color: Color::from([0.34, 0.34, 0.34, 1.]),
+            cosine_max_snow_slope: (45. * PI / 180.).cos(),
+            cosine_max_tree_slope: (40. * PI / 180.).cos(),
+            u_bound: X_VIEW_DIST_M as f32,
+            v_bound: Z_VIEW_DIST_M as f32,
+            normal_texture: normal_handle.into(),
+        }),
+        ..default()
+    });
 }
 
 #[derive(Component)]
@@ -383,7 +381,7 @@ fn main() {
         .add_systems(Startup, create_terrain)
         .add_systems(Startup, add_lighting)
         .add_systems(Startup, spawn_player)
-        .add_systems(Startup, load_terrain)
+        // .add_systems(Startup, load_terrain)
         // .add_systems(RunFixedUpdateLoop, pan_orbit_camera)
         .add_systems(Update, (movement_input, mouse_look, toggle_cursor_lock))
         .run();
