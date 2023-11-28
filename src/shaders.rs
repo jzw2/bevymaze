@@ -1,4 +1,4 @@
-use bevy::asset::load_internal_asset;
+use bevy::asset::{Asset, load_internal_asset, embedded_asset};
 use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
 use bevy::reflect::{TypePath, TypeUuid};
@@ -7,10 +7,10 @@ use bevy::render::render_resource::{
     AsBindGroup, RenderPipelineDescriptor, ShaderRef, SpecializedMeshPipelineError,
 };
 
-pub const CURVATURE_MESH_VERTEX_OUTPUT: HandleUntyped =
-    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 128741983741982);
+pub const CURVATURE_MESH_VERTEX_OUTPUT: Handle<Shader> =
+    Handle::weak_from_u128(128741983741982);
 
-pub const UTIL: HandleUntyped = HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 128742342344982);
+pub const UTIL: Handle<Shader> = Handle::weak_from_u128(128742342344982);
 
 pub struct CurvaturePlugin {}
 
@@ -26,7 +26,7 @@ impl Plugin for CurvaturePlugin {
     }
 }
 
-#[derive(AsBindGroup, Debug, Clone, TypeUuid, TypePath)]
+#[derive(Asset, AsBindGroup, Debug, Clone, TypeUuid, TypePath)]
 #[uuid = "b62bb455-a72c-4b56-87bb-81e0554e234f"]
 pub struct TerrainMaterial {
     #[uniform(0)]
@@ -58,6 +58,8 @@ pub struct TerrainMaterial {
     #[texture(12)]
     #[sampler(13)]
     pub(crate) normal_texture: Option<Handle<Image>>,
+    #[uniform(14)]
+    pub(crate) scale: f32,
 }
 
 /// The Material trait is very configurable, but comes with sensible defaults for all methods.

@@ -9,18 +9,15 @@ use crate::player_controller::{
 use crate::shaders::{CurvaturePlugin, TerrainMaterial};
 use crate::terrain_loader::get_chunk;
 use crate::terrain_render::{
-    create_base_terrain_mesh, create_terrain_mesh, create_terrain_normal_map, load_terrain_heights,
-    X_VIEW_DISTANCE, X_VIEW_DIST_M, Z_VIEW_DISTANCE, Z_VIEW_DIST_M,
+    create_base_terrain_mesh, create_terrain_mesh, create_terrain_normal_map, create_terrain_height_map,
+    load_terrain_heights, X_VIEW_DISTANCE, X_VIEW_DIST_M, Z_VIEW_DISTANCE, Z_VIEW_DIST_M, SCALE, TEXTURE_SCALE
 };
 use bevy::app::RunFixedUpdateLoop;
 use bevy::math::Vec3;
 use bevy::pbr::wireframe::{WireframeConfig, WireframePlugin};
 use bevy::pbr::{CascadeShadowConfigBuilder, NotShadowCaster};
 use bevy::prelude::*;
-use bevy::render::mesh::VertexAttributeValues::{Float32x2, Float32x3};
-use bevy::render::render_resource::{FilterMode, SamplerDescriptor, WgpuFeatures};
-use bevy::render::settings::WgpuSettings;
-use bevy::render::RenderPlugin;
+use bevy::render::texture::{ImageSamplerDescriptor, ImageFilterMode};
 use bevy::tasks::{AsyncComputeTaskPool, Task};
 use bevy_atmosphere::prelude::*;
 use bevy_framepace::{FramepacePlugin, FramepaceSettings, Limiter};
@@ -28,7 +25,7 @@ use bevy_mod_wanderlust::{
     ControllerBundle, ControllerInput, ControllerPhysicsBundle, WanderlustPlugin,
 };
 use bevy_rapier3d::prelude::*;
-use bevy_shader_utils::ShaderUtilsPlugin;
+//use bevy_shader_utils::ShaderUtilsPlugin;
 use futures_util::{pin_mut, FutureExt, Stream, StreamExt};
 use server::terrain_data::TerrainTile;
 use server::terrain_gen::{TerrainGenerator, MAX_HEIGHT, TILE_SIZE};
@@ -37,6 +34,7 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::{connect_async, connect_async_with_config};
 use url::Url;
 
+//mod bvh;
 mod maze_gen;
 mod maze_render;
 mod player_controller;
@@ -83,6 +81,7 @@ fn spawn_player(
             ControllerBundle {
                 physics: ControllerPhysicsBundle {
                     // Lock the axes to prevent camera shake whilst moving up slopes
+                    /*
                     locked_axes: LockedAxes::ROTATION_LOCKED,
                     restitution: Restitution {
                         coefficient: 0.0,
@@ -92,7 +91,7 @@ fn spawn_player(
                         Vec3::new(0.0, 0.0, 0.0),
                         Vec3::new(0.0, 2.0, 0.0),
                         0.5,
-                    ),
+                    ),*/
                     ..default()
                 },
                 ..default()
@@ -118,6 +117,7 @@ fn spawn_player(
                             far: 200.0 * 1000.0,
                         }),
                         camera: Camera {
+                            // hdr: true,
                             ..default()
                         },
                         ..default()
@@ -152,9 +152,9 @@ fn add_lighting(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
-    // mut wireframe_config: ResMut<WireframeConfig>,
+    //mut wireframe_config: ResMut<WireframeConfig>,
 ) {
-    // wireframe_config.global = true;
+    //wireframe_config.global = true;
     let cascade_shadow_config = CascadeShadowConfigBuilder {
         first_cascade_far_bound: 0.3,
         maximum_distance: 3.0,
@@ -201,7 +201,8 @@ fn create_terrain(
     let terrain_gen = TerrainGenerator::new();
     let terrain_mesh = create_terrain_mesh(&terrain_gen);
 
-    let mut heights: Vec<Real> = vec![];
+
+    let mut heights: Vec<f32> = vec![];
     let dims = 100 / 2;
     for x in 0..dims {
         for z in 0..dims {
@@ -279,6 +280,7 @@ fn load_terrain(
     mut materials: ResMut<Assets<TerrainMaterial>>,
     mut textures: ResMut<Assets<Image>>,
 ) {
+    /*
     println!("Load terrain start");
     // Rust tells me this won't run unless I await it or whatever but I can't since load_terrain is async
     let mesh = create_base_terrain_mesh();
@@ -332,7 +334,7 @@ fn load_terrain(
             println!("Fail");
         }
     };
-
+    */
     return;
 }
 
@@ -341,31 +343,41 @@ fn main() {
         // .insert_resource(ClearColor(Color::rgb(0., 0., 0.)))
         // the sky color
         // .insert_resource(ClearColor(Color::rgb(0.5294, 0.8078, 0.9216)))
-        .add_plugins((
+        .add_plugins(
             DefaultPlugins.set(ImagePlugin {
-                default_sampler: SamplerDescriptor {
+                default_sampler: ImageSamplerDescriptor {
                     // address_mode_u: AddressMode::Repeat,
                     // address_mode_v: AddressMode::Repeat,
                     // address_mode_w: AddressMode::Repeat,
-                    mag_filter: FilterMode::Linear,
+                    mag_filter: ImageFilterMode::Linear,
                     ..Default::default()
                 },
-            }),
-            // .set(RenderPlugin {
-            //     wgpu_settings: WgpuSettings {
-            //         features: WgpuFeatures::POLYGON_MODE_LINE,
-            //         ..default()
-            //     },
-            // }),
+            })
+        )
+            /*.set(RenderPlugin {
+                wgpu_settings: WgpuSettings {
+                    features: WgpuFeatures::POLYGON_MODE_LINE,
+                    ..default()
+                },
+            })*/
+        .add_plugins(
             MaterialPlugin::<TerrainMaterial> { ..default() },
+        )
+        /*.add_plugins(
             ShaderUtilsPlugin,
+        )*/
+        .add_plugins(
             CurvaturePlugin {},
+        )
+        .add_plugins(
             aether_spyglass::SpyglassPlugin,
+        )
+        .add_plugins(
             FramepacePlugin,
-        ))
+        )
         .add_plugins(AtmospherePlugin)
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
-        .add_plugins(WanderlustPlugin)
+        .add_plugins(WanderlustPlugin::default())
         .insert_resource(RapierConfiguration {
             timestep_mode: TimestepMode::Fixed {
                 dt: 0.008,

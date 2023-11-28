@@ -17,9 +17,16 @@
 
 #import bevy_pbr::gtao_utils gtao_multibounce
 
-#import bevy_shader_utils::perlin_noise_2d perlin_noise_2d
+//#import bevy_shader_utils::perlin_noise_2d perlin_noise_2d
 
 #import bevymaze::util lin_map
+
+#import bevy_pbr::{
+    //forward_io::VertexOutput,
+    //mesh_view_bindings::view,
+    pbr_types::{STANDARD_MATERIAL_FLAGS_DOUBLE_SIDED_BIT, PbrInput, pbr_input_new},
+    //pbr_functions as fns,
+}
 
 @group(1) @binding(0)
 var<uniform> max_height: f32;
@@ -49,12 +56,14 @@ var<uniform> v_bound: f32;
 var normal_texture: texture_2d<f32>;
 @group(1) @binding(13)
 var normal_sampler: sampler;
+@group(1) @binding(14)
+var<uniform> scale: f32;
 
 @fragment
 fn fragment(
     in: CuravtureMeshVertexOutput,
 ) -> @location(0) vec4<f32> {
-    var pbr = pbr_functions::pbr_input_new();
+    var pbr = pbr_input_new();
     pbr.frag_coord = in.position;
     pbr.world_position = in.world_position;
 
@@ -63,11 +72,11 @@ fn fragment(
     // Do the polar arsinh transform
     // Get the polar
     var uv = in.uv;
-//    let r = sqrt(uv[0]*uv[0] + uv[1]*uv[1]);
-//    let theta = atan2(uv[1], uv[0]);
-//    // arsinh the magnitude and revert back to cart
-//    uv[0] = asinh(r) * cos(theta);
-//    uv[1] = asinh(r) * sin(theta);
+    let r = sqrt(uv[0]*uv[0] + uv[1]*uv[1]);
+    let theta = atan2(uv[1], uv[0]);
+    // arsinh the magnitude and revert back to cart
+    uv[0] = asinh(r*scale)/scale * cos(theta);
+    uv[1] = asinh(r*scale)/scale * sin(theta);
     // Now do a linear transform to get to texture space
     uv[0] = lin_map(-u_bound, u_bound, 0.0, 1.0, uv[0]);
     uv[1] = lin_map(-v_bound, v_bound, 0.0, 1.0, uv[1]);
@@ -87,7 +96,7 @@ fn fragment(
 
     var base_color = stone_color;
     let pos_vector = vec2<f32>(in.original_world_position[0] * 0.001, in.original_world_position[2] * 0.001);
-    let height_frac = in.original_world_position[1] / max_height + 0.08 * perlin_noise_2d(pos_vector);
+    let height_frac = in.original_world_position[1] / max_height + 0.0; //0.08 * perlin_noise_2d(pos_vector);
     if (height_frac < grass_line) {
         base_color = grass_color;
     } else if (height_frac < tree_line) {
@@ -103,7 +112,7 @@ fn fragment(
     pbr.material.base_color = base_color;
     pbr.material.perceptual_roughness = 0.98;
     pbr.material.reflectance = 0.001;
-    var output_color = pbr_functions::pbr(pbr);
+    var output_color = pbr_functions::apply_pbr_lighting(pbr);
     output_color = pbr_functions::apply_fog(fog, output_color, in.world_position.xyz, view.world_position.xyz);
 
     return output_color;

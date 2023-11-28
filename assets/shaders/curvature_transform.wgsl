@@ -2,11 +2,18 @@
 #import bevy_pbr::mesh_bindings       mesh
 #import bevy_pbr::mesh_view_bindings
 //#import bevy_pbr::mesh_vertex_output  MeshVertexOutput
+#import bevymaze::util lin_map 
 #import bevymaze::curvature_mesh_vertex_output  CuravtureMeshVertexOutput
 
 #import bevy_pbr::mesh_functions
 #import bevy_pbr::skinning
 #import bevy_pbr::morph
+#import bevy_pbr::{
+    //mesh_view_bindings::view,
+    //mesh_bindings::mesh,
+    //mesh_types::MESH_FLAGS_SIGN_DETERMINANT_MODEL_3X3_BIT,
+    view_transformations::position_world_to_clip,
+}
 
 //#import bevy_render::instance_index
 
@@ -50,6 +57,14 @@ struct Vertex {
 #endif
 };
 
+
+@group(1) @binding(10)
+var<uniform> u_bound: f32;
+@group(1) @binding(11)
+var<uniform> v_bound: f32;
+
+
+
 /// I just copy and pasted this stuff because i'm whacky
 @vertex
 fn vertex(vertex_no_morph: Vertex) -> CuravtureMeshVertexOutput {
@@ -59,18 +74,19 @@ fn vertex(vertex_no_morph: Vertex) -> CuravtureMeshVertexOutput {
 
     // Use vertex_no_morph.instance_index instead of vertex.instance_index to work around a wgpu dx12 bug.
     // See https://github.com/gfx-rs/naga/issues/2416 .
-    var model = mesh.model;
+    var model = mesh_functions::get_model_matrix(vertex_no_morph.instance_index);
 
 #ifdef VERTEX_NORMALS
     out.world_normal = bevy_pbr::mesh_functions::mesh_normal_local_to_world(
         vertex.normal,
 //        // Use vertex_no_morph.instance_index instead of vertex.instance_index to work around a wgpu dx12 bug.
 //        // See https://github.com/gfx-rs/naga/issues/2416
-//        get_instance_index(vertex_no_morph.instance_index)
+        get_instance_index(vertex_no_morph.instance_index)
     );
 #endif
 
 #ifdef VERTEX_POSITIONS
+    out.uv = vertex.uv;
     out.world_position = bevy_pbr::mesh_functions::mesh_position_local_to_world(model, vec4<f32>(vertex.position, 1.0));
     out.original_world_position = out.world_position;
     /// Here we calculate the height that we need to subtract
@@ -83,10 +99,10 @@ fn vertex(vertex_no_morph: Vertex) -> CuravtureMeshVertexOutput {
     let view_world_pos = bevy_pbr::mesh_view_bindings::view.world_position.xyz;
     let rel_pos = out.world_position.xyz - view_world_pos;
     let origin_dist: f32 = sqrt(rel_pos[0]*rel_pos[0] + rel_pos[2]*rel_pos[2]);
-    if origin_dist > 1000.0 {
+    if false { //origin_dist > 1000.0 {
         // only apply our transformation at large distances, because otherwise
         // rounding errors become noticable
-        let EARTH_RAD: f32 = (6.378e+6)/4.0;
+        let EARTH_RAD: f32 = (6.378e+6);
         let theta: f32 = origin_dist / EARTH_RAD;
         let r = EARTH_RAD + out.world_position[1];
         let unrotated_pos = vec3<f32>(r * sin(theta), r * (cos(theta) - 1.0), 0.0);
@@ -100,7 +116,7 @@ fn vertex(vertex_no_morph: Vertex) -> CuravtureMeshVertexOutput {
         let mapped: vec3<f32> = rotation_mat*unrotated_pos + view_world_pos;
         out.world_position = vec4<f32>(mapped[0], mapped[1] + out.world_position[1] - view_world_pos[1], mapped[2], out.world_position[3]);
     }
-    out.position = bevy_pbr::mesh_functions::mesh_position_world_to_clip(out.world_position);
+    out.position = position_world_to_clip(out.world_position.xyz);
 #endif
 
 #ifdef VERTEX_UVS

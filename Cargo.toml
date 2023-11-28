@@ -12,14 +12,12 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-# bevy = { version = "0.11.0", features = ["wayland"] }
-bevy = { version = "0.11.0"}
+bevy = { version = "0.12.0"}
 image = "0.24.6"
 imageproc = "0.23.0"
 petgraph = "0.6.3"
 rand = "0.8.5"
 rusttype = "0.9.3"
-#bevy_terrain = { path = "bevy_terrain" }
 server = { path = "server" }
 noise = "0.8.2"
 qoi = "0.4.1"
@@ -28,18 +26,22 @@ itertools = "0.11.0"
 bevy_shader_utils = "0.5.2"
 delaunator = "1.0.2"
 roots = "0.0.8"
-bevy_rapier3d = "0.22.0"
-bevy_mod_wanderlust = "0.4.0"
-bevy_framepace = "0.13.3"
-aether_spyglass = "0.2.0"
+bevy_rapier3d = "0.23.0"
+# bevy_mod_wanderlust = "0.4.0"
+bevy_mod_wanderlust = { path = "../bevy_mod_wanderlust" }
+bevy_framepace = "0.14.1"
+# aether_spyglass = "0.2.0"
+aether_spyglass = { path = "../aether_spyglass" }
 log = "0.4.20"
 futures-util = "0.3.29"
 tokio-tungstenite = "0.20.1"
 url = "2.4.1"
 env_logger = "0.10.0"
 tokio = "1.33.0"
-bevy_easings = "0.11.1"
+bevy_easings = "0.12.2"
 hilbert = "0.1.2"
 fixed = "1.24.0"
 async-stream = "0.3.5"
-bevy_atmosphere = "0.7.0"
+bevy_atmosphere = "0.8.1"
+kiddo = "3.0.0"
+caches = "0.2.7"

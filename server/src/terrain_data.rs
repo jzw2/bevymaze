@@ -164,3 +164,90 @@ pub fn coords_to_idx(coords: (usize, usize)) -> usize {
     let coords = (swap_bit_order(coords.0), swap_bit_order(coords.1));
     return interleave_bits(coords.0, coords.1) as usize;
 }
+
+/*
+/// The lattice plane is the set of points that we transform to get the final view-normalized
+/// terrain plane
+/// We create our lattice plane within an ellipse
+/// After it's transformed this just so happens to be a decent approximation for a rectangle
+/// Calculating the number of vertices in the ellipse is analogous to computing the area
+/// which happens to have a nice formula (a * b * pi = A, where a/b are the major/minor axes)
+/// So we calculate the length of the axes and then we use the formula x^2/a^2 + y^2/b^2 = 1
+/// to get the specific height/width of the ellipse at a certain position along one of the axes
+pub fn create_lattice_plane() -> Vec<DVec3> {
+    let mut verts: Vec<DVec3> = vec![];
+    let x_bound = (X_VIEW_DIST_M*SCALE).asinh()/SCALE;
+    let z_bound = (Z_VIEW_DIST_M*SCALE).asinh()/SCALE;
+    let aspect_ratio = x_bound / z_bound;
+
+    let z_0_sqr: f64 = 3. / 4.;
+    let z_0 = z_0_sqr.sqrt();
+
+    let x_verts = (z_0 * TERRAIN_VERTICES as f64 * aspect_ratio / PI)
+        .sqrt()
+        .ceil() as i32;
+    let z_verts = (TERRAIN_VERTICES as f64 / (PI * x_verts as f64)).ceil() as i32;
+
+    let total_verts = (PI * (x_verts * z_verts) as f64) as i32;
+    println!(
+        "x verts {} | z verts {} | total {} | maj axis {} (ex {}) | min axis {} (ex {})",
+        x_verts,
+        z_verts,
+        total_verts,
+        2. * z_verts as f64 / z_0,
+        2. * z_bound,
+        2. * x_verts as f64,
+        2. * x_bound
+    );
+
+    for z_idx in -z_verts..z_verts {
+        let z_pos = lin_map(
+            -z_verts as f64,
+            z_verts as f64,
+            -z_bound,
+            z_bound,
+            z_idx as f64,
+        );
+        let x_bound_cur = (x_bound.powi(2) - aspect_ratio.powi(2) * z_pos.powi(2)).sqrt();
+        let x_verts_above = (x_bound_cur / x_bound * x_verts as f64).ceil() as i32;
+
+        for x_idx in -x_verts_above..x_verts_above {
+            let x_pos = lin_map(
+                -x_verts as f64,
+                x_verts as f64,
+                -x_bound,
+                x_bound,
+                x_idx as f64 + 0.5 * (z_idx % 2) as f64,
+            );
+            verts.push(DVec3::new(x_pos, 0., z_pos));
+        }
+    }
+
+    return verts;
+}
+
+
+/// This function transforms to the lattice plane into our final terrain mesh
+/// We also align our grid points to the nearest half meter to make fetching terrain data easier
+/// Here we sample assuming the probability dist
+/// p = 1/sqrt((ar)^2+1)
+/// the cdf of p aka c is c = asinh(ar)/a
+/// the inverse cdf is then sinh(ap)/a
+/// This makes our math look quite simple
+/// The most complicated bit is changing to polar coordinates to do the transformation
+pub fn transform_lattice_positions(lattice: &mut Vec<DVec3>) {
+    for lattice_pos in lattice {
+        let pol = cart_to_polar((lattice_pos.x, lattice_pos.z));
+        lattice_pos.x = (pol.0*SCALE).sinh()/SCALE * pol.1.cos();
+        lattice_pos.z = (pol.0*SCALE).sinh()/SCALE * pol.1.sin();
+        // round the transformed pos to the nearest grid pos (half of a meter)
+        lattice_pos.x = (lattice_pos.x * 2.).round()/2.;
+        lattice_pos.z = (lattice_pos.z * 2.).round()/2.;
+    }
+    // TODO: remove duplicates
+    
+    // for lattice_pos in lattice {
+    //     if lattice_pos
+    // }
+}
+*/
