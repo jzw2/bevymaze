@@ -1,4 +1,4 @@
-use crate::terrain_render::{TERRAIN_VERTICES, X_VIEW_DISTANCE, Z_VIEW_DISTANCE};
+use crate::terrain_render::{create_lattice_plane, transform_lattice_positions, TERRAIN_VERTICES, X_VIEW_DISTANCE, Z_VIEW_DISTANCE};
 use bevy_easings::Lerp;
 use futures_util::{FutureExt, SinkExt, Stream, StreamExt, TryFutureExt};
 use log::*;
@@ -17,6 +17,10 @@ use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream,
 };
 use url::Url;
+
+use kiddo::KdTree;
+use kiddo::SquaredEuclidean;
+use kiddo::NearestNeighbour;
 
 struct TileData {
     data: Vec<Vec<f64>>,
@@ -117,4 +121,21 @@ pub async fn get_chunk(
         .expect("Failed to send for chunk");
     let msg = socket.next().await.expect("Can't fetch chunk");
     return TerrainTile::from(msg.unwrap().into_data());
+}
+
+pub fn get_required_data(center: (i32, i32), lattice: &Vec<(i32, i32)>, data: &mut KdTree<f64, 2>) -> Vec<(i32, i32)> {
+    let mut to_fetch = vec![];
+    /*
+    // iterate over all the vertices in our terrain mesh
+    // find the closest point
+    // if it's not close enough, fetch a new one
+    for lattice_pos in lattice {
+        let world_pos = (center.0 + lattice_pos.0, center.1 + lattice_pos.1);
+        let nearest = data.nearest_one::<SquaredEuclidean>(&[world_pos.0, world_pos.1]);
+        // TODO: make non-static distance
+        if nearest.distance > 1.0 {
+            to_fetch.push(world_pos);
+        }
+    }*/
+    return to_fetch;
 }
