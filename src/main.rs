@@ -9,15 +9,16 @@ use crate::player_controller::{
 use crate::shaders::{CurvaturePlugin, TerrainMaterial};
 use crate::terrain_loader::get_chunk;
 use crate::terrain_render::{
-    create_base_terrain_mesh, create_terrain_mesh, create_terrain_normal_map, create_terrain_height_map,
-    load_terrain_heights, X_VIEW_DISTANCE, X_VIEW_DIST_M, Z_VIEW_DISTANCE, Z_VIEW_DIST_M, SCALE, TEXTURE_SCALE
+    create_base_terrain_mesh, create_terrain_height_map, create_terrain_mesh,
+    create_terrain_normal_map, load_terrain_heights, SCALE, TEXTURE_SCALE, X_VIEW_DISTANCE,
+    X_VIEW_DIST_M, Z_VIEW_DISTANCE, Z_VIEW_DIST_M,
 };
 use bevy::app::RunFixedUpdateLoop;
 use bevy::math::Vec3;
 use bevy::pbr::wireframe::{WireframeConfig, WireframePlugin};
 use bevy::pbr::{CascadeShadowConfigBuilder, NotShadowCaster};
 use bevy::prelude::*;
-use bevy::render::texture::{ImageSamplerDescriptor, ImageFilterMode};
+use bevy::render::texture::{ImageFilterMode, ImageSamplerDescriptor};
 use bevy::tasks::{AsyncComputeTaskPool, Task};
 use bevy_atmosphere::prelude::*;
 use bevy_framepace::{FramepacePlugin, FramepaceSettings, Limiter};
@@ -45,6 +46,7 @@ mod terrain_render;
 mod test_render;
 mod tests;
 mod tree_render;
+// mod bvh;
 
 /// Spawn the player's collider and camera
 fn spawn_player(
@@ -79,6 +81,7 @@ fn spawn_player(
     commands
         .spawn((
             ControllerBundle {
+                transform: Transform::from_xyz(0., 100., 0.),
                 physics: ControllerPhysicsBundle {
                     // Lock the axes to prevent camera shake whilst moving up slopes
                     /*
@@ -201,7 +204,6 @@ fn create_terrain(
     let terrain_gen = TerrainGenerator::new();
     let terrain_mesh = create_terrain_mesh(&terrain_gen);
 
-
     let mut heights: Vec<f32> = vec![];
     let dims = 100 / 2;
     for x in 0..dims {
@@ -233,7 +235,6 @@ fn create_terrain(
 
     let normal_handle = textures.add(create_terrain_normal_map(&terrain_gen));
 
-
     commands.spawn(MaterialMeshBundle {
         mesh: meshes.add(terrain_mesh),
         material: materials.add(TerrainMaterial {
@@ -247,9 +248,10 @@ fn create_terrain(
             stone_color: Color::from([0.34, 0.34, 0.34, 1.]),
             cosine_max_snow_slope: (45. * PI / 180.).cos(),
             cosine_max_tree_slope: (40. * PI / 180.).cos(),
-            u_bound: X_VIEW_DIST_M as f32,
-            v_bound: Z_VIEW_DIST_M as f32,
+            u_bound: ((X_VIEW_DIST_M * TEXTURE_SCALE).asinh() / TEXTURE_SCALE) as f32,
+            v_bound: ((Z_VIEW_DIST_M * TEXTURE_SCALE).asinh() / TEXTURE_SCALE) as f32,
             normal_texture: normal_handle.into(),
+            scale: TEXTURE_SCALE as f32,
         }),
         ..default()
     });
@@ -343,38 +345,28 @@ fn main() {
         // .insert_resource(ClearColor(Color::rgb(0., 0., 0.)))
         // the sky color
         // .insert_resource(ClearColor(Color::rgb(0.5294, 0.8078, 0.9216)))
-        .add_plugins(
-            DefaultPlugins.set(ImagePlugin {
-                default_sampler: ImageSamplerDescriptor {
-                    // address_mode_u: AddressMode::Repeat,
-                    // address_mode_v: AddressMode::Repeat,
-                    // address_mode_w: AddressMode::Repeat,
-                    mag_filter: ImageFilterMode::Linear,
-                    ..Default::default()
-                },
-            })
-        )
-            /*.set(RenderPlugin {
-                wgpu_settings: WgpuSettings {
-                    features: WgpuFeatures::POLYGON_MODE_LINE,
-                    ..default()
-                },
-            })*/
-        .add_plugins(
-            MaterialPlugin::<TerrainMaterial> { ..default() },
-        )
+        .add_plugins(DefaultPlugins.set(ImagePlugin {
+            default_sampler: ImageSamplerDescriptor {
+                // address_mode_u: AddressMode::Repeat,
+                // address_mode_v: AddressMode::Repeat,
+                // address_mode_w: AddressMode::Repeat,
+                mag_filter: ImageFilterMode::Linear,
+                ..Default::default()
+            },
+        }))
+        /*.set(RenderPlugin {
+            wgpu_settings: WgpuSettings {
+                features: WgpuFeatures::POLYGON_MODE_LINE,
+                ..default()
+            },
+        })*/
+        .add_plugins(MaterialPlugin::<TerrainMaterial> { ..default() })
         /*.add_plugins(
             ShaderUtilsPlugin,
         )*/
-        .add_plugins(
-            CurvaturePlugin {},
-        )
-        .add_plugins(
-            aether_spyglass::SpyglassPlugin,
-        )
-        .add_plugins(
-            FramepacePlugin,
-        )
+        .add_plugins(CurvaturePlugin {})
+        .add_plugins(aether_spyglass::SpyglassPlugin)
+        .add_plugins(FramepacePlugin)
         .add_plugins(AtmospherePlugin)
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
         .add_plugins(WanderlustPlugin::default())

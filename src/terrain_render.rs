@@ -5,7 +5,7 @@ use async_stream::stream;
 use bevy::math::{DVec3, Vec4};
 use bevy::prelude::{Image, Mesh};
 use bevy::render::mesh::{Indices, PrimitiveTopology};
-use bevy::render::render_resource::TextureFormat::{Rgba8Snorm, R32Float};
+use bevy::render::render_resource::TextureFormat::{R32Float, Rgba8Snorm};
 use bevy::render::render_resource::{Extent3d, TextureDimension};
 use delaunator::triangulate;
 use fixed::types::extra::{U12, U13};
@@ -81,8 +81,8 @@ pub fn vertex_color(vertex: [f32; 3]) -> [f32; 4] {
 /// to get the specific height/width of the ellipse at a certain position along one of the axes
 pub fn create_lattice_plane() -> Vec<DVec3> {
     let mut verts: Vec<DVec3> = vec![];
-    let x_bound = (X_VIEW_DIST_M*SCALE).asinh()/SCALE;
-    let z_bound = (Z_VIEW_DIST_M*SCALE).asinh()/SCALE;
+    let x_bound = (X_VIEW_DIST_M * SCALE).asinh() / SCALE;
+    let z_bound = (Z_VIEW_DIST_M * SCALE).asinh() / SCALE;
     let aspect_ratio = x_bound / z_bound;
 
     let z_0_sqr: f64 = 3. / 4.;
@@ -140,11 +140,11 @@ pub fn create_lattice_plane() -> Vec<DVec3> {
 pub fn transform_lattice_positions(lattice: &mut Vec<DVec3>) {
     for lattice_pos in lattice {
         let pol = cart_to_polar((lattice_pos.x, lattice_pos.z));
-        lattice_pos.x = (pol.0*SCALE).sinh()/SCALE * pol.1.cos();
-        lattice_pos.z = (pol.0*SCALE).sinh()/SCALE * pol.1.sin();
+        lattice_pos.x = (pol.0 * SCALE).sinh() / SCALE * pol.1.cos();
+        lattice_pos.z = (pol.0 * SCALE).sinh() / SCALE * pol.1.sin();
         // round the transformed pos to the nearest grid pos (quarter of a meter)
-        lattice_pos.x = (lattice_pos.x * 2.).round()/2.;
-        lattice_pos.z = (lattice_pos.z * 2.).round()/2.;
+        lattice_pos.x = (lattice_pos.x * 2.).round() / 2.;
+        lattice_pos.z = (lattice_pos.z * 2.).round() / 2.;
     }
     // TODO: remove duplicates
 
@@ -301,8 +301,8 @@ pub fn load_terrain_heights(
 }
 
 pub fn create_terrain_height_map(generator: &TerrainGenerator) -> Image {
-    let x_bound = (X_VIEW_DIST_M*SCALE).asinh()/SCALE;
-    let z_bound = (Z_VIEW_DIST_M*SCALE).asinh()/SCALE;
+    let x_bound = (X_VIEW_DIST_M * SCALE).asinh() / SCALE;
+    let z_bound = (Z_VIEW_DIST_M * SCALE).asinh() / SCALE;
 
     let dimx = 512;
     let dimz = (dimx as f64 * (z_bound / x_bound)).round() as usize;
@@ -323,8 +323,8 @@ pub fn create_terrain_height_map(generator: &TerrainGenerator) -> Image {
             let mut z_world_pos = lin_map(0., (dimz * s) as f64, -z_bound, z_bound, z as f64);
             let r = (x_world_pos.powi(2) + z_world_pos.powi(2)).sqrt();
             let theta = z_world_pos.atan2(x_world_pos);
-            x_world_pos = (r*SCALE).sinh()/SCALE * theta.cos();
-            z_world_pos = (r*SCALE).sinh()/SCALE * theta.sin();
+            x_world_pos = (r * SCALE).sinh() / SCALE * theta.cos();
+            z_world_pos = (r * SCALE).sinh() / SCALE * theta.sin();
             // now get the normal vector for this one
             let height = generator.get_height_for(x_world_pos, z_world_pos);
             // finally average it with the existing stored vec
@@ -335,7 +335,6 @@ pub fn create_terrain_height_map(generator: &TerrainGenerator) -> Image {
         println!("Done row {x}");
     }
 
-
     /*
     let mut data2: Vec<f32> = vec![];
     for z in 0..dimz {
@@ -344,7 +343,6 @@ pub fn create_terrain_height_map(generator: &TerrainGenerator) -> Image {
         }
     }
     */
-
 
     // we store the vectors with 2 bytes
     // we omit the last dimension because we can recalculate it in the shader
@@ -358,8 +356,6 @@ pub fn create_terrain_height_map(generator: &TerrainGenerator) -> Image {
             simple_data.append(&mut Vec::from((data[x][z] as f32).to_ne_bytes()));
         }
     }
-
-
 
     // DEBUG
     let mut img: RgbImage = ImageBuffer::new(dimx as u32, dimz as u32);
@@ -386,15 +382,14 @@ pub fn create_terrain_height_map(generator: &TerrainGenerator) -> Image {
         R32Float,
     );
 
-
     //return data2;
 }
 
 pub fn create_terrain_normal_map(generator: &TerrainGenerator) -> Image {
-    let x_bound = (X_VIEW_DIST_M*TEXTURE_SCALE).asinh()/TEXTURE_SCALE;
-    let z_bound = (Z_VIEW_DIST_M*TEXTURE_SCALE).asinh()/TEXTURE_SCALE;
+    let x_bound = (X_VIEW_DIST_M * TEXTURE_SCALE).asinh() / TEXTURE_SCALE;
+    let z_bound = (Z_VIEW_DIST_M * TEXTURE_SCALE).asinh() / TEXTURE_SCALE;
 
-    let dimx = 512;
+    let dimx = 1024;
     let dimz = (dimx as f64 * (z_bound / x_bound)).round() as usize;
 
     println!("{} {} | {} {}", x_bound, z_bound, dimx, dimz);
@@ -413,8 +408,8 @@ pub fn create_terrain_normal_map(generator: &TerrainGenerator) -> Image {
             let mut z_world_pos = lin_map(0., (dimz * s) as f64, -z_bound, z_bound, z as f64);
             let r = (x_world_pos.powi(2) + z_world_pos.powi(2)).sqrt();
             let theta = z_world_pos.atan2(x_world_pos);
-            x_world_pos = (r*TEXTURE_SCALE).sinh()/TEXTURE_SCALE * theta.cos();
-            z_world_pos = (r*TEXTURE_SCALE).sinh()/TEXTURE_SCALE * theta.sin();
+            x_world_pos = (r * TEXTURE_SCALE).sinh() / TEXTURE_SCALE * theta.cos();
+            z_world_pos = (r * TEXTURE_SCALE).sinh() / TEXTURE_SCALE * theta.sin();
             // now get the normal vector for this one
             let normal = generator.get_normal(x_world_pos, z_world_pos);
             // finally average it with the existing stored vec

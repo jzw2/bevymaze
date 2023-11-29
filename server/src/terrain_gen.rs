@@ -1,14 +1,7 @@
 use crate::terrain_data::{compressed_height, idx_to_coords, DATUM_COUNT, TILE_DIM};
 use crate::util::{lin_map, smooth_maximum_unit};
-use bevy::math::{DVec2, DVec3};
-use itertools::{iproduct, Position};
-use noise::utils::NoiseImage;
-use noise::{NoiseFn, Perlin, Simplex};
-use qoi::{decode_to_vec, encode_to_vec, Encoder};
-use std::cmp::max;
-use std::iter::Map;
-use std::ops::Range;
-
+use bevy::math::{DVec3};
+use libnoise::prelude::*;
 /// Constants related to the resolution of the terrain signal
 ////// The amount of samples we take for the tile
 pub const TILE_RESOLUTION: usize = 256usize;
@@ -43,20 +36,20 @@ pub type TerrainNormals = Vec<[DVec3; TILE_RESOLUTION + 1]>;
 pub type TilePosition = (i64, i64);
 
 pub struct TerrainGenerator {
-    mountain_noise_generators: [Perlin; 4],
-    valley_noise_generators: [Perlin; 2],
+    mountain_noise_generators: [Simplex<2>; 4],
+    valley_noise_generators: [Simplex<2>; 2],
 }
 
 impl TerrainGenerator {
     pub fn new() -> Self {
         Self {
             mountain_noise_generators: [
-                Perlin::new(5),
-                Perlin::new(0),
-                Perlin::new(1),
-                Perlin::new(2),
+                Source::simplex(10),
+                Source::simplex(11),
+                Source::simplex(12),
+                Source::simplex(13),
             ],
-            valley_noise_generators: [Perlin::new(3), Perlin::new(4)],
+            valley_noise_generators: [Source::simplex(13), Source::simplex(14)],
         }
     }
 
@@ -75,10 +68,10 @@ impl TerrainGenerator {
         let amp2 = MOUNTAIN_SMALL_AMP;
         let amp3 = MOUNTAIN_MICRO_AMP;
 
-        return self.mountain_noise_generators[0].get([x * freq0, z * freq0]) * amp0 / 2.
-            + self.mountain_noise_generators[1].get([x * freq1, z * freq1]) * amp1 / 2.
-            + self.mountain_noise_generators[2].get([x * freq2, z * freq2]) * amp2 / 2.
-            + self.mountain_noise_generators[3].get([x * freq3, z * freq3]) * amp3 / 2.
+        return self.mountain_noise_generators[0].sample([x * freq0, z * freq0]) * amp0 / 2.
+            + self.mountain_noise_generators[1].sample([x * freq1, z * freq1]) * amp1 / 2.
+            + self.mountain_noise_generators[2].sample([x * freq2, z * freq2]) * amp2 / 2.
+            + self.mountain_noise_generators[3].sample([x * freq3, z * freq3]) * amp3 / 2.
             + (amp1 + amp2 + amp3) / 2.
             + MOUNTAIN_HEIGHT_OFFSET;
     }
@@ -91,8 +84,8 @@ impl TerrainGenerator {
         let amp1 = 20.;
         let amp2 = 5.;
         return smooth_maximum_unit(
-            self.valley_noise_generators[0].get([x * scale * freq1, y * scale * freq1]) * amp1 - 3.,
-            self.valley_noise_generators[1].get([x * scale * freq2, y * scale * freq2]) * amp2,
+            self.valley_noise_generators[0].sample([x * scale * freq1, y * scale * freq1]) * amp1 - 3.,
+            self.valley_noise_generators[1].sample([x * scale * freq2, y * scale * freq2]) * amp2,
             2.,
         );
     }

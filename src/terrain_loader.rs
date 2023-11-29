@@ -1,4 +1,8 @@
-use crate::terrain_render::{create_lattice_plane, transform_lattice_positions, TERRAIN_VERTICES, X_VIEW_DISTANCE, Z_VIEW_DISTANCE};
+use crate::terrain_render::{
+    create_lattice_plane, transform_lattice_positions, TERRAIN_VERTICES, X_VIEW_DISTANCE,
+    Z_VIEW_DISTANCE,
+};
+use bevy::prelude::Mesh;
 use bevy_easings::Lerp;
 use futures_util::{FutureExt, SinkExt, Stream, StreamExt, TryFutureExt};
 use log::*;
@@ -8,7 +12,6 @@ use server::util::{cart_to_polar, lin_map, polar_to_cart};
 use std::arch::asm;
 use std::f64::consts::PI;
 use std::io::BufReader;
-use bevy::prelude::Mesh;
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{
@@ -19,8 +22,8 @@ use tokio_tungstenite::{
 use url::Url;
 
 use kiddo::KdTree;
-use kiddo::SquaredEuclidean;
 use kiddo::NearestNeighbour;
+use kiddo::SquaredEuclidean;
 
 struct TileData {
     data: Vec<Vec<f64>>,
@@ -123,7 +126,11 @@ pub async fn get_chunk(
     return TerrainTile::from(msg.unwrap().into_data());
 }
 
-pub fn get_required_data(center: (i32, i32), lattice: &Vec<(i32, i32)>, data: &mut KdTree<f64, 2>) -> Vec<(i32, i32)> {
+pub fn get_required_data(
+    center: (i32, i32),
+    lattice: &Vec<(i32, i32)>,
+    data: &mut KdTree<f64, 2>,
+) -> Vec<(i32, i32)> {
     let mut to_fetch = vec![];
     /*
     // iterate over all the vertices in our terrain mesh

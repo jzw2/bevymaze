@@ -1,4 +1,4 @@
-use bevy::asset::{Asset, load_internal_asset, embedded_asset};
+use bevy::asset::{embedded_asset, load_internal_asset, Asset};
 use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
 use bevy::reflect::{TypePath, TypeUuid};
@@ -7,8 +7,7 @@ use bevy::render::render_resource::{
     AsBindGroup, RenderPipelineDescriptor, ShaderRef, SpecializedMeshPipelineError,
 };
 
-pub const CURVATURE_MESH_VERTEX_OUTPUT: Handle<Shader> =
-    Handle::weak_from_u128(128741983741982);
+pub const CURVATURE_MESH_VERTEX_OUTPUT: Handle<Shader> = Handle::weak_from_u128(128741983741982);
 
 pub const UTIL: Handle<Shader> = Handle::weak_from_u128(128742342344982);
 

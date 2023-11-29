@@ -35,7 +35,7 @@ fn as_u8_slice<T>(v: &[T]) -> &[u8] {
 }
 
 async fn get_from_coordinates(peer: SocketAddr, stream: TcpStream) -> Result<()> {
-     let mut ws_stream = accept_async(stream).await.expect("Failed to accept");
+    let mut ws_stream = accept_async(stream).await.expect("Failed to accept");
 
     info!("New WebSocket connection: {}", peer);
 
@@ -44,8 +44,8 @@ async fn get_from_coordinates(peer: SocketAddr, stream: TcpStream) -> Result<()>
         if msg.is_binary() {
             let bin = msg.into_data()?;
         }
-        
-        let mut buffer: Vec<u16>; 
+
+        let mut buffer: Vec<u16>;
         if msg.is_text() {
             let text = msg.into_text()?;
             let reg = Regex::new(r"([0-9]+),([0-9]+):([0-9]+)").unwrap();
@@ -106,7 +106,6 @@ async fn get_from_coordinates(peer: SocketAddr, stream: TcpStream) -> Result<()>
     }
 
     Ok(())
-
 }
 
 async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {

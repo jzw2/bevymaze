@@ -245,7 +245,7 @@ pub fn transform_lattice_positions(lattice: &mut Vec<DVec3>) {
         lattice_pos.z = (lattice_pos.z * 2.).round()/2.;
     }
     // TODO: remove duplicates
-    
+
     // for lattice_pos in lattice {
     //     if lattice_pos
     // }
