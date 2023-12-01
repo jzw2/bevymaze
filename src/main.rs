@@ -35,7 +35,6 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::{connect_async, connect_async_with_config};
 use url::Url;
 
-//mod bvh;
 mod maze_gen;
 mod maze_render;
 mod player_controller;
@@ -46,7 +45,7 @@ mod terrain_render;
 mod test_render;
 mod tests;
 mod tree_render;
-// mod bvh;
+mod bvh;
 
 /// Spawn the player's collider and camera
 fn spawn_player(
