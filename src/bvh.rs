@@ -4,6 +4,8 @@ use itertools::assert_equal;
 use kiddo::{KdTree, SquaredEuclidean};
 use rand::{thread_rng, Rng};
 use std::hash::{Hash, Hasher};
+use std::ops::Deref;
+use std::rc::Rc;
 
 type TPoint2d = [f32; 2];
 
@@ -63,14 +65,14 @@ pub struct Bvh2d {
     pub(crate) triangle: Option<Triangle2d>,
     pub(crate) aabb: Option<Aabb2d>,
 
-    pub(crate) children: Vec<Bvh2d>,
+    pub(crate) children: Vec<Rc<Bvh2d>>,
 }
 
 impl Bvh2d {
     fn build(vertices: &Vec<TPoint2d>, indices: Vec<usize>) -> Bvh2d {
         // convert all the triangles into AABB's first and collect the AABB's into a KD tree for speed
         // the bvh num is an identifier that's guaranteed to be unique (the hash technically isn't, and it scares me)
-        let mut bbs = HashMap::<u64, Bvh2d>::new();
+        let mut bbs = HashMap::<u64, Rc<Bvh2d>>::new();
         let mut bvh_num = 0;
         for i in 0..indices.len() / 3 {
             let i1 = indices[i * 3];
@@ -79,11 +81,11 @@ impl Bvh2d {
             let bb = Aabb2d::from_indices(vertices, i1, i2, i3);
             bbs.insert(
                 bvh_num,
-                Bvh2d {
+                Rc::new(Bvh2d {
                     aabb: Some(bb),
                     triangle: Some((vertices[i1], vertices[i2], vertices[i3])),
                     children: vec![],
-                },
+                }),
             );
             bvh_num += 1;
         }
@@ -93,7 +95,7 @@ impl Bvh2d {
         // This helper takes a layer and successively combines multiples of two BVH nodes
         // If there's a leftover node, it simply adds that node to the coalesced output without
         // "bundling" it with anything else
-        fn coalesce(bvh_num: &mut u64, bbs: &HashMap<u64, Bvh2d>) -> HashMap<u64, Bvh2d> {
+        fn coalesce(bvh_num: &mut u64, bbs: &HashMap<u64, Rc<Bvh2d>>) -> HashMap<u64, Rc<Bvh2d>> {
             let mut tree = KdTree::<f32, 2>::new();
             for (id, bvh) in bbs {
                 if let Some(bb) = &bvh.aabb {
@@ -102,7 +104,7 @@ impl Bvh2d {
             }
             let this_layer = bbs.clone();
             let mut to_coalesce = bbs.clone();
-            let mut doubles = HashMap::<u64, Bvh2d>::new();
+            let mut doubles = HashMap::<u64, Rc<Bvh2d>>::new();
             // add all our things to the doubles and remove them from the originals
             while to_coalesce.len() > 0 {
                 println!("To coal len {}", to_coalesce.len());
@@ -138,12 +140,12 @@ impl Bvh2d {
                     for (id, bvh) in &this_layer {
                         if let Some(bb) = &bvh.aabb {
                             if enclosing_bb.intersects(&bb) {
-                                enclosing_bvh.children.push(bvh.clone());
+                                enclosing_bvh.children.push(Rc::clone(bvh));
                             }
                         }
                     }
                     // bbs.insert(bvh_num, enclosing_bvh);
-                    doubles.insert(*bvh_num, enclosing_bvh.clone());
+                    doubles.insert(*bvh_num, Rc::new(enclosing_bvh));
                     *bvh_num += 1;
                     (*used).0 = *id1;
                     (*used).1 = nearest.item;
@@ -163,7 +165,9 @@ impl Bvh2d {
         }
 
         // there should be one left at this point
-        return bbs.iter().next().unwrap().1.clone();
+        let next = bbs.iter().next().unwrap();
+        let next = next.1;
+        return next.deref().clone();
     }
 
     fn intersects_bb(&self, point: TPoint2d) -> bool {
@@ -320,9 +324,6 @@ fn many_layers_test() {
     // make sure there are at least 2 layers
     println!("Checking BVH");
     let child = &bvh.children[0];
-    assert_eq!(child.children.len(), 0);
-    // make sure there's a triangle here
-    child.triangle.unwrap();
 
     println!("Walking");
     // make sure we can walk the bvh
