@@ -90,8 +90,6 @@ impl Bvh2d {
             bvh_num += 1;
         }
 
-        println!("Created initial list");
-
         // This helper takes a layer and successively combines multiples of two BVH nodes
         // If there's a leftover node, it simply adds that node to the coalesced output without
         // "bundling" it with anything else
@@ -107,7 +105,7 @@ impl Bvh2d {
             let mut doubles = HashMap::<u64, Rc<Bvh2d>>::new();
             // add all our things to the doubles and remove them from the originals
             while to_coalesce.len() > 0 {
-                println!("To coal len {}", to_coalesce.len());
+                // println!("coal len {}", to_coalesce.len());
                 if to_coalesce.len() == 1 {
                     // leftover, add it and return
                     let (id1, bvh1) = to_coalesce.iter().next().unwrap();
@@ -137,7 +135,8 @@ impl Bvh2d {
                     // finally find all the children that intersect it
                     // here's where we add the two children that we made the BB out of in the first place,
                     // as well as any other BB's that happen to intersect
-                    for (id, bvh) in &this_layer {
+                    for nearest_n in tree.nearest_n::<SquaredEuclidean>(&bb1.center(), 6) {
+                        let bvh = this_layer.get(&nearest_n.item).unwrap();
                         if let Some(bb) = &bvh.aabb {
                             if enclosing_bb.intersects(&bb) {
                                 enclosing_bvh.children.push(Rc::clone(bvh));
@@ -180,6 +179,7 @@ impl Bvh2d {
         return false;
     }
 
+    /// Adapted from https://stackoverflow.com/a/14382692/3210986
     fn intersects_tri(&self, point: TPoint2d) -> bool {
         if let Some(tri) = self.triangle {
             let p0 = tri.0;
@@ -309,7 +309,7 @@ fn many_layers_test() {
     let mut points = vec![];
     let mut delaunay_points: Vec<Point> = vec![];
     println!("Generating points");
-    for _ in 0..100 {
+    for _ in 0..100000 {
         let p = [
             thread_rng().gen_range(-5.0..5.0),
             thread_rng().gen_range(-5.0..5.0),

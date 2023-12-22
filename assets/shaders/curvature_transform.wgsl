@@ -40,6 +40,7 @@ fn get_instance_index(instance_index: u32) -> u32 {
 
 struct Vertex {
     @builtin(instance_index) instance_index: u32,
+    @builtin(vertex_index) vertex_index: u32,
 #ifdef VERTEX_POSITIONS
     @location(0) position: vec3<f32>,
 #endif
@@ -55,7 +56,29 @@ struct Vertex {
 #ifdef VERTEX_COLORS
     @location(4) color: vec4<f32>,
 #endif
+    @location(5) triangle_index:
 };
+
+/// Raw triples (xyz) of data unorganized terrain data.
+@group(0) @binding(0) var<storage, read> terrain_data_verts: array<f32>;
+/// A list of triples of indices representing the Delaunay triangulation.
+/// Each number corresponds to the index of a datapoint in terrain_data_verts
+@group(0) @binding(1) var<storage, read> triangulation: array<u32>;
+
+/// Coordinates representing the nearest triangle
+struct NearestTriangleCoords {
+    /// Index of the triangle in `triangulation`
+    idx: u32,
+    /// Barycentric coordinates. A,B,C coorespond the verts at idx+0,idx+1,idx+2 respectively
+    bA: f32,
+    bB: f32,
+    bC: f32,
+}
+
+/// The calculated triangle and barycentric coords representing the triangle
+/// that a vertex falls in
+/// Coords at i correspond to a vert at 3*i
+@group(0) @binding(4) var<storage, write> triangle_coords: array<NearestTriangleCoords>;
 
 
 @group(1) @binding(10)
@@ -63,7 +86,9 @@ var<uniform> u_bound: f32;
 @group(1) @binding(11)
 var<uniform> v_bound: f32;
 
-
+fn idx_to_vert(idx: u32) -> vec3<f32> {
+    return vec3(terrain_data_verts[idx], terrain_data_verts[idx+1], terrain_data_verts[idx+2]);
+}
 
 /// I just copy and pasted this stuff because i'm whacky
 @vertex
@@ -86,8 +111,20 @@ fn vertex(vertex_no_morph: Vertex) -> CuravtureMeshVertexOutput {
 #endif
 
 #ifdef VERTEX_POSITIONS
+    // we have to calculate our pre-curvature height here!
+    let coords = triangle_coords[vertex.vertex_index];
+    let a_idx = triangulation[coords.idx];
+    let b_idx = triangulation[coords.idx+1];
+    let c_idx = triangulation[coords.idx+2];
+
     out.uv = vertex.uv;
     out.world_position = bevy_pbr::mesh_functions::mesh_position_local_to_world(model, vec4<f32>(vertex.position, 1.0));
+    out.world_position.y =
+        terrain_data_verts[a_idx+1]*coords.bA +
+        terrain_data_verts[b_idx+1]*coords.bB +
+        terrain_data_verts[c_idx+1]*coords.bC;
+
+    // original being before the curvature, not the height in this case
     out.original_world_position = out.world_position;
     /// Here we calculate the height that we need to subtract
     /// this is dependent on the distance from the origin
@@ -114,7 +151,12 @@ fn vertex(vertex_no_morph: Vertex) -> CuravtureMeshVertexOutput {
         }
         let rotation_mat = mat3x3<f32>(cos(phi), 0.0, -sin(phi), 0.0, 1.0, 0.0, sin(phi), 0.0, cos(phi));
         let mapped: vec3<f32> = rotation_mat*unrotated_pos + view_world_pos;
-        out.world_position = vec4<f32>(mapped[0], mapped[1] + out.world_position[1] - view_world_pos[1], mapped[2], out.world_position[3]);
+        out.world_position =
+            vec4<f32>(
+                mapped[0],
+                mapped[1] + out.world_position[1] - view_world_pos[1],
+                mapped[2],
+                out.world_position[3]);
     }
     out.position = position_world_to_clip(out.world_position.xyz);
 #endif
@@ -145,57 +187,3 @@ fn vertex(vertex_no_morph: Vertex) -> CuravtureMeshVertexOutput {
 
     return out;
 }
-
-
-//#import bevy_pbr::mesh_view_bindings
-//#import bevy_pbr::mesh_bindings
-//
-//// NOTE: Bindings must come before functions that use them!
-//#import bevy_pbr::mesh_functions
-//
-//#import bevy_shader_utils::simplex_noise_3d
-//#import bevy_shader_utils::simplex_noise_2d
-//
-//struct StandardMaterial {
-//    time: f32,
-//    // ship_position: vec3<f32>,
-//    // base_color: vec4<f32>;
-//    // emissive: vec4<f32>;
-//    // perceptual_roughness: f32;
-//    // metallic: f32;
-//    // reflectance: f32;
-//    // // 'flags' is a bit field indicating various options. u32 is 32 bits so we have up to 32 options.
-//    // flags: u32;
-//    // alpha_cutoff: f32;
-//};
-//
-//@vertex
-//fn vertex(vertex: Vertex) -> MeshVertexOutput {
-//    var out: MeshVertexOutput;
-//
-//    var model = mesh.model;
-//    out.world_normal = mesh_normal_local_to_world(vertex.normal);
-//
-//    out.world_position = mesh_position_local_to_world(model, vec4<f32>(vertex.position, 1.0));
-//#ifdef VERTEX_UVS
-//    out.uv = vertex.uv;
-//#endif
-//#ifdef VERTEX_TANGENTS
-//    out.world_tangent = mesh_tangent_local_to_world(model, vertex.tangent);
-//#endif
-//#ifdef VERTEX_COLORS
-//    out.color = vertex.color;
-//#endif
-//
-//
-//    var noise = simplexNoise3(vertex.position);
-//
-//    out.color = vec4<f32>(0.5, noise, 0.5, 1.0);
-//
-//    out.world_position = mesh_position_local_to_world(model, vec4<f32>(vertex.position.x, noise, vertex.position.z, 1.0));
-//
-//    out.clip_position = mesh_position_world_to_clip(out.world_position);
-//
-//
-//    return out;
-//}

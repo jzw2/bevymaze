@@ -6,7 +6,7 @@ use crate::player_controller::{
     mouse_look, movement_input, pan_orbit_camera, toggle_cursor_lock, PanOrbitCamera, PlayerBody,
     PlayerCam,
 };
-use crate::shaders::{CurvaturePlugin, TerrainMaterial};
+use crate::shaders::{TerrainMaterial, TerrainPlugin};
 use crate::terrain_loader::get_chunk;
 use crate::terrain_render::{
     create_base_terrain_mesh, create_terrain_height_map, create_terrain_mesh,
@@ -14,6 +14,7 @@ use crate::terrain_render::{
     X_VIEW_DIST_M, Z_VIEW_DISTANCE, Z_VIEW_DIST_M,
 };
 use bevy::app::RunFixedUpdateLoop;
+use bevy::log::LogPlugin;
 use bevy::math::Vec3;
 use bevy::pbr::wireframe::{WireframeConfig, WireframePlugin};
 use bevy::pbr::{CascadeShadowConfigBuilder, NotShadowCaster};
@@ -22,6 +23,7 @@ use bevy::render::texture::{ImageFilterMode, ImageSamplerDescriptor};
 use bevy::tasks::{AsyncComputeTaskPool, Task};
 use bevy_atmosphere::prelude::*;
 use bevy_framepace::{FramepacePlugin, FramepaceSettings, Limiter};
+use bevy_mod_debugdump::print_render_graph;
 use bevy_mod_wanderlust::{
     ControllerBundle, ControllerInput, ControllerPhysicsBundle, WanderlustPlugin,
 };
@@ -45,7 +47,8 @@ mod terrain_render;
 mod test_render;
 mod tests;
 mod tree_render;
-mod bvh;
+mod voronoi_3d;
+mod pregracke;
 
 /// Spawn the player's collider and camera
 fn spawn_player(
@@ -340,19 +343,24 @@ fn load_terrain(
 }
 
 fn main() {
-    let _ = App::new()
+    let mut app = App::new();
+    app
         // .insert_resource(ClearColor(Color::rgb(0., 0., 0.)))
         // the sky color
         // .insert_resource(ClearColor(Color::rgb(0.5294, 0.8078, 0.9216)))
-        .add_plugins(DefaultPlugins.set(ImagePlugin {
-            default_sampler: ImageSamplerDescriptor {
-                // address_mode_u: AddressMode::Repeat,
-                // address_mode_v: AddressMode::Repeat,
-                // address_mode_w: AddressMode::Repeat,
-                mag_filter: ImageFilterMode::Linear,
-                ..Default::default()
-            },
-        }))
+        .add_plugins(
+            DefaultPlugins
+                .set(ImagePlugin {
+                    default_sampler: ImageSamplerDescriptor {
+                        // address_mode_u: AddressMode::Repeat,
+                        // address_mode_v: AddressMode::Repeat,
+                        // address_mode_w: AddressMode::Repeat,
+                        mag_filter: ImageFilterMode::Linear,
+                        ..Default::default()
+                    },
+                })
+                .disable::<LogPlugin>(),
+        )
         /*.set(RenderPlugin {
             wgpu_settings: WgpuSettings {
                 features: WgpuFeatures::POLYGON_MODE_LINE,
@@ -363,7 +371,7 @@ fn main() {
         /*.add_plugins(
             ShaderUtilsPlugin,
         )*/
-        .add_plugins(CurvaturePlugin {})
+        .add_plugins(TerrainPlugin {})
         .add_plugins(aether_spyglass::SpyglassPlugin)
         .add_plugins(FramepacePlugin)
         .add_plugins(AtmospherePlugin)
@@ -386,6 +394,6 @@ fn main() {
         .add_systems(Startup, spawn_player)
         // .add_systems(Startup, load_terrain)
         // .add_systems(RunFixedUpdateLoop, pan_orbit_camera)
-        .add_systems(Update, (movement_input, mouse_look, toggle_cursor_lock))
-        .run();
+        .add_systems(Update, (movement_input, mouse_look, toggle_cursor_lock));
+    print_render_graph(&mut app);
 }

@@ -1,6 +1,6 @@
 use crate::terrain_data::{compressed_height, idx_to_coords, DATUM_COUNT, TILE_DIM};
 use crate::util::{lin_map, smooth_maximum_unit};
-use bevy::math::{DVec3};
+use bevy::math::DVec3;
 use libnoise::prelude::*;
 /// Constants related to the resolution of the terrain signal
 ////// The amount of samples we take for the tile
@@ -84,7 +84,8 @@ impl TerrainGenerator {
         let amp1 = 20.;
         let amp2 = 5.;
         return smooth_maximum_unit(
-            self.valley_noise_generators[0].sample([x * scale * freq1, y * scale * freq1]) * amp1 - 3.,
+            self.valley_noise_generators[0].sample([x * scale * freq1, y * scale * freq1]) * amp1
+                - 3.,
             self.valley_noise_generators[1].sample([x * scale * freq2, y * scale * freq2]) * amp2,
             2.,
         );
