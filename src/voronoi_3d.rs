@@ -21,7 +21,7 @@ fn sqr_dist(mut p1: [f32; 3], p2: &[f32; 3]) -> f32 {
 
 type PointIdx = ([f32; 3], usize);
 
-struct FlatKdTree3d {
+pub struct FlatKdTree3d {
     /// Raw point data
     /// Pair representing the vertex and and the original index before being shuffled around
     data: Vec<PointIdx>,

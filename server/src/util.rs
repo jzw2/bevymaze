@@ -50,3 +50,28 @@ pub fn polar_angle(p: (f64, f64)) -> f64 {
 pub fn cart_to_polar(p: (f64, f64)) -> (f64, f64) {
     return (origin_dist(p), polar_angle(p));
 }
+
+pub fn barycentric(point: &[f64; 2], tri: &[[f64; 2]; 3]) -> (f64, f64) {
+    let p0 = tri[0];
+    let p1 = tri[1];
+    let p2 = tri[2];
+    let area = 0.5
+        * (-p1[1] * p2[0]
+            + p0[1] * (-p1[0] + p2[0])
+            + p0[0] * (p1[1] - p2[1])
+            + p1[0] * p2[1]);
+    let s = 1. / (2. * area)
+        * (p0[1] * p2[0] - p0[0] * p2[1]
+            + (p2[1] - p0[1]) * point[0]
+            + (p0[0] - p2[0]) * point[1]);
+    let t = 1. / (2. * area)
+        * (p0[0] * p1[1] - p0[1] * p1[0]
+            + (p0[1] - p1[1]) * p0[0]
+            + (p1[0] - p0[0]) * point[1]);
+    return (s, t);
+}
+
+pub fn intersects_tri(point: &[f64; 2], tri: &[[f64; 2]; 3]) -> bool {
+    let (s, t) = barycentric(point, tri);
+    return s >= 0. && t >= 0. && 1. - s - t >= 0.;
+}
