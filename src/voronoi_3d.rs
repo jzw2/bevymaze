@@ -5,11 +5,12 @@ use crate::terrain_render::{X_VIEW_DIST_M, Z_VIEW_DIST_M};
 use bevy::render::render_resource::encase::private::RuntimeSizedArray;
 use delaunator::{triangulate, Point, Triangulation, EMPTY};
 use kiddo::KdTree;
-use rand::{thread_rng, Rng};
+use rand::{thread_rng, Rng, SeedableRng};
 use server::util::{dist, lin_map};
 use std::collections::VecDeque;
 use std::mem::swap;
 use std::time::Instant;
+use rand::prelude::StdRng;
 
 #[inline(always)]
 fn sqr_dist(mut p1: [f32; 3], p2: &[f32; 3]) -> f32 {
@@ -406,18 +407,30 @@ fn nn_test() {
 fn create_and_find_bench() {
     let mut queries = vec![];
     let mut points = vec![];
+    let mut r = StdRng::seed_from_u64(222);
+    fn transform(p: &mut [f64; 2]) -> &[f64; 2] {
+        let mut mag = (p[0] * p[0] + p[1] * p[1]).sqrt();
+        p[0] /= mag;
+        p[1] /= mag;
+        mag = mag.sinh();
+        p[0] *= mag;
+        p[1] *= mag;
+        return p;
+    }
     for x in 0..100 {
         for y in 0..1000 {
-            points.push([
-                thread_rng().gen_range(-X_VIEW_DIST_M..X_VIEW_DIST_M),
-                thread_rng().gen_range(-Z_VIEW_DIST_M..Z_VIEW_DIST_M),
-            ]);
-            if queries.len() < 10000 {
-                queries.push([
-                    thread_rng().gen_range(-X_VIEW_DIST_M..X_VIEW_DIST_M) as f32,
-                    thread_rng().gen_range(-Z_VIEW_DIST_M..Z_VIEW_DIST_M) as f32,
-                    0.,
+            let x_range = -X_VIEW_DIST_M.asinh()..X_VIEW_DIST_M.asinh();
+            let z_range = -Z_VIEW_DIST_M.asinh()..Z_VIEW_DIST_M.asinh();
+            points.push(*transform(&mut [
+                r.gen_range(x_range.clone()),
+                r.gen_range(z_range.clone()),
+            ]));
+            if queries.len() < 50000 {
+                let q = *transform(&mut [
+                    r.gen_range(x_range.clone()),
+                    r.gen_range(z_range.clone()),
                 ]);
+                queries.push([q[0] as f32, q[1] as f32, 0.]);
             }
         }
     }
@@ -447,34 +460,34 @@ fn create_and_find_bench() {
     let total = total.elapsed();
     println!("Finding 100k nearest elapsed: {:.2?}", elapsed);
     println!("Total elapsed: {:.2?}", total);
-
-    let total = Instant::now();
-    let now = Instant::now();
-    let delaunay_points: Vec<Point> = points
-        .iter()
-        .map(|v| Point {
-            x: (*v)[0],
-            y: (*v)[1],
-        })
-        .collect();
-    let triangulation = triangulate(&delaunay_points);
-    let elapsed = now.elapsed();
-    println!("Constructing triangulation elapsed: {:.7?}", elapsed);
-
-    let now = Instant::now();
-    let centers = voronoi_centers_from_triangulation(&points, &triangulation)
-        .iter()
-        .map(|e| [e[0] as f32, e[1] as f32, e[2] as f32])
-        .collect();
-    let elapsed = now.elapsed();
-    println!("Constructing circumcenters elapsed: {:.7?}", elapsed);
-
-    let now = Instant::now();
-    for query in &queries {
-        let nearest = nearest_linear(&centers, query);
-    }
-    let elapsed = now.elapsed();
-    let total = total.elapsed();
-    println!("Finding 100k nearest elapsed: {:.2?}", elapsed);
-    println!("Total elapsed: {:.2?}", total);
+    //
+    // let total = Instant::now();
+    // let now = Instant::now();
+    // let delaunay_points: Vec<Point> = points
+    //     .iter()
+    //     .map(|v| Point {
+    //         x: (*v)[0],
+    //         y: (*v)[1],
+    //     })
+    //     .collect();
+    // let triangulation = triangulate(&delaunay_points);
+    // let elapsed = now.elapsed();
+    // println!("Constructing triangulation elapsed: {:.7?}", elapsed);
+    //
+    // let now = Instant::now();
+    // let centers = voronoi_centers_from_triangulation(&points, &triangulation)
+    //     .iter()
+    //     .map(|e| [e[0] as f32, e[1] as f32, e[2] as f32])
+    //     .collect();
+    // let elapsed = now.elapsed();
+    // println!("Constructing circumcenters elapsed: {:.7?}", elapsed);
+    //
+    // let now = Instant::now();
+    // for query in &queries {
+    //     let nearest = nearest_linear(&centers, query);
+    // }
+    // let elapsed = now.elapsed();
+    // let total = total.elapsed();
+    // println!("Finding 100k nearest elapsed: {:.2?}", elapsed);
+    // println!("Total elapsed: {:.2?}", total);
 }

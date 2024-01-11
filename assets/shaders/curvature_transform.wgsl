@@ -56,38 +56,149 @@ struct Vertex {
 #ifdef VERTEX_COLORS
     @location(4) color: vec4<f32>,
 #endif
-    @location(5) triangle_index:
 };
 
-/// Raw triples (xyz) of data unorganized terrain data.
-@group(0) @binding(0) var<storage, read> terrain_data_verts: array<f32>;
-/// A list of triples of indices representing the Delaunay triangulation.
-/// Each number corresponds to the index of a datapoint in terrain_data_verts
-@group(0) @binding(1) var<storage, read> triangulation: array<u32>;
-
-/// Coordinates representing the nearest triangle
-struct NearestTriangleCoords {
-    /// Index of the triangle in `triangulation`
-    idx: u32,
-    /// Barycentric coordinates. A,B,C coorespond the verts at idx+0,idx+1,idx+2 respectively
-    bA: f32,
-    bB: f32,
-    bC: f32,
-}
-
-/// The calculated triangle and barycentric coords representing the triangle
-/// that a vertex falls in
-/// Coords at i correspond to a vert at 3*i
-@group(0) @binding(4) var<storage, write> triangle_coords: array<NearestTriangleCoords>;
-
+const max_u32: u32 = 4294967295u;
 
 @group(1) @binding(10)
 var<uniform> u_bound: f32;
 @group(1) @binding(11)
 var<uniform> v_bound: f32;
 
-fn idx_to_vert(idx: u32) -> vec3<f32> {
-    return vec3(terrain_data_verts[idx], terrain_data_verts[idx+1], terrain_data_verts[idx+2]);
+/// len is MAX_TRIANGLES * 3
+@group(1) @binding(15)
+var<storage, read> triangles: array<u32>;
+
+/// len is MAX_TRIANGLES * 3
+@group(1) @binding(16)
+var<storage, read> halfedges: array<u32>;
+
+/// len is 2 * MAX_VERTICES
+@group(1) @binding(17)
+var<storage, read> vertices: array<f32>;
+
+/// len is MAX_VERTICES
+@group(1) @binding(18)
+var<storage, read> height: array<f32>;
+
+/// len is 2 * MAX_VERTICES
+@group(1) @binding(19)
+var<storage, read> gradients: array<f32>;
+
+/// len is TERRAIN_VERTICES
+@group(1) @binding(20)
+var<storage, read_write> triangle_indices: array<u32>;
+
+/// Next halfedge in a triangle.
+fn next_halfedge(i: u32) -> u32 {
+    if i % 3u == 2u {
+        return i - 2u;
+    } else {
+        return i + 1u;
+    }
+}
+
+/// Previous halfedge in a triangle.
+fn prev_halfedge(i: u32) -> u32 {
+    if i % 3u == 0u {
+        return i + 2u;
+    } else {
+        return i - 1u;
+    }
+}
+
+/// Copied and adapted from
+/// https://observablehq.com/@mootari/delaunay-findtriangle
+/// Returns the orientation of three points A, B and C:
+///   -1 = counterclockwise
+///    0 = collinear
+///    1 = clockwise
+/// More on the topic: http://www.dcs.gla.ac.uk/~pat/52233/slides/Geometry1x1.pdf
+fn orientation(a: vec2<f32>, b: vec2<f32>, c: vec2<f32>) -> f32 {
+    // Determinant of vectors of the line segments AB and BC:
+    // [ cx - bx ][ bx - ax ]
+    // [ cy - by ][ by - ay ]
+    return sign((c.x - b.x) * (b.y - a.y) - (c.y - b.y) * (b.x - a.x));
+}
+
+fn find_triangle(p: vec2<f32>, edge: u32) -> u32 {
+    if edge == max_u32 {
+        return edge;
+    }
+    // coords is required for delaunator compatibility.
+    var current = edge;
+    var start = current;
+    var n: u32 = 0u;
+
+    // we don't want to go more than 20 times
+    for (var i: i32 = 0; i < 100; i++) {
+        let next: u32 = next_halfedge(current);
+        let pc: u32 = 2u * triangles[current];
+        let pn: u32 = 2u * triangles[next];
+
+        let a = vec2<f32>(vertices[pc], vertices[pc + 1u]);
+        let b = vec2<f32>(vertices[pn], vertices[pn + 1u]);
+
+        let ori: f32 = orientation(a, b, p);
+
+        if ori >= 0. {
+            current = next;
+            if start == current {
+                break;
+            }
+        } else {
+            if halfedges[current] == max_u32 {
+                break;
+            }
+            current = halfedges[current];
+            n += 1u;
+            if n % 2u != 0u {
+                current = next_halfedge(current);
+            } else {
+                current = prev_halfedge(current);
+            }
+            start = current;
+        }
+    }
+    return current;
+}
+
+// Copied and adapted from https://gamedev.stackexchange.com/a/23745
+// Compute barycentric coordinates (u, v, w) for
+// point p with respect to triangle (a, b, c)
+fn barycentric(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>, c: vec2<f32>) -> vec3<f32> {
+    let v0 = b - a; let v1 = c - a; let v2 = p - a;
+    let d00 = dot(v0, v0);
+    let d01 = dot(v0, v1);
+    let d11 = dot(v1, v1);
+    let d20 = dot(v2, v0);
+    let d21 = dot(v2, v1);
+    let denom = d00 * d11 - d01 * d01;
+    let v = (d11 * d20 - d01 * d21) / denom;
+    let w = (d00 * d21 - d01 * d20) / denom;
+    return vec3<f32>(v, w, 1.0 - v - w);
+}
+
+fn interp(ai: u32, bi: u32, ci: u32, triangle: u32, bary: vec2<f32>) -> f32 {
+    let x: f32 = bary.x;
+    let y: f32 = bary.y;
+
+    let p10: f32 = height[ai];
+    let p9 = gradients[ai * 2u + 1u];
+    let p8 = gradients[ai * 2u];
+    // let p7 = f32(0); // ignore, but here because it looks nicer
+    let p2 = -2.0 * height[ci] + p9 + 2.0 * p10 + gradients[ci * 2u + 1u];
+    let p6 = height[ci] - p9 - p10 - p2;
+    let p1 = -2.0 * height[bi] + p8 + 2.0 * p10 + gradients[bi * 2u];
+    let p5 = height[bi] - p8 - p10 - p1;
+    let p4 = gradients[ci * 2u] - p8;
+    let p3 = gradients[bi * 2u + 1u] - p9;
+
+    return
+        p1 * x*x*x + p2 * y*y*y + p3 * x*x * y + p4 * x * y*y +
+        p5 * x*x + p6 * y*y + // p7 * x * y
+        p8 * x + p9 * y +
+        p10;
 }
 
 /// I just copy and pasted this stuff because i'm whacky
@@ -111,18 +222,32 @@ fn vertex(vertex_no_morph: Vertex) -> CuravtureMeshVertexOutput {
 #endif
 
 #ifdef VERTEX_POSITIONS
-    // we have to calculate our pre-curvature height here!
-    let coords = triangle_coords[vertex.vertex_index];
-    let a_idx = triangulation[coords.idx];
-    let b_idx = triangulation[coords.idx+1];
-    let c_idx = triangulation[coords.idx+2];
 
     out.uv = vertex.uv;
     out.world_position = bevy_pbr::mesh_functions::mesh_position_local_to_world(model, vec4<f32>(vertex.position, 1.0));
-    out.world_position.y =
-        terrain_data_verts[a_idx+1]*coords.bA +
-        terrain_data_verts[b_idx+1]*coords.bB +
-        terrain_data_verts[c_idx+1]*coords.bC;
+
+    var previous = triangle_indices[vertex.vertex_index];
+    if previous == max_u32 {
+        previous = 0u;
+    }
+    let found = find_triangle(out.world_position.xz, previous);
+    triangle_indices[vertex.vertex_index] = found;
+    if found != max_u32 {
+        let tri = 3u * (found / 3u);
+        let ai = 2u * triangles[tri];
+        let bi = 2u * triangles[tri + 1u];
+        let ci = 2u * triangles[tri + 2u];
+        let a = vec2<f32>(vertices[ai], vertices[ai + 1u]);
+        let b = vec2<f32>(vertices[bi], vertices[bi + 1u]);
+        let c = vec2<f32>(vertices[ci], vertices[ci + 1u]);
+        let bary = barycentric(out.world_position.xz, a, b, c);
+        out.world_position.y = interp(ai / 2u, bi / 2u, ci / 2u, found / 3u, bary.xy);
+//        if out.world_position.y > 3000.0 {
+//            out.world_position.y = 0.0;
+//        }
+    } else {
+        out.world_position.y = 0.0;
+    }
 
     // original being before the curvature, not the height in this case
     out.original_world_position = out.world_position;
@@ -136,7 +261,7 @@ fn vertex(vertex_no_morph: Vertex) -> CuravtureMeshVertexOutput {
     let view_world_pos = bevy_pbr::mesh_view_bindings::view.world_position.xyz;
     let rel_pos = out.world_position.xyz - view_world_pos;
     let origin_dist: f32 = sqrt(rel_pos[0]*rel_pos[0] + rel_pos[2]*rel_pos[2]);
-    if false { //origin_dist > 1000.0 {
+    if origin_dist > 1000.0 {
         // only apply our transformation at large distances, because otherwise
         // rounding errors become noticable
         let EARTH_RAD: f32 = (6.378e+6);

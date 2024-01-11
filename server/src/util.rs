@@ -51,6 +51,7 @@ pub fn cart_to_polar(p: (f64, f64)) -> (f64, f64) {
     return (origin_dist(p), polar_angle(p));
 }
 
+#[inline]
 pub fn barycentric(point: &[f64; 2], tri: &[[f64; 2]; 3]) -> (f64, f64) {
     let p0 = tri[0];
     let p1 = tri[1];
@@ -71,7 +72,42 @@ pub fn barycentric(point: &[f64; 2], tri: &[[f64; 2]; 3]) -> (f64, f64) {
     return (s, t);
 }
 
-pub fn intersects_tri(point: &[f64; 2], tri: &[[f64; 2]; 3]) -> bool {
+#[inline(always)]
+/// Copied and adapted from
+/// https://observablehq.com/@mootari/delaunay-findtriangle
+/// Returns the orientation of three points A, B and C:
+///   -1 = counterclockwise
+///    0 = collinear
+///    1 = clockwise
+/// More on the topic: http://www.dcs.gla.ac.uk/~pat/52233/slides/Geometry1x1.pdf
+pub fn orientation(a: &[f64; 2], b: &[f64; 2], c: &[f64; 2]) -> f64 {
+    // Determinant of vectors of the line segments AB and BC:
+    // [ cx - bx ][ bx - ax ]
+    // [ cy - by ][ by - ay ]
+    let [ax, ay] = a;
+    let [bx, by] = b;
+    let [cx, cy] = c;
+    return ((cx - bx) * (by - ay) - (cy - by) * (bx - ax)).signum();
+}
+
+/// Copied and adapted from https://stackoverflow.com/a/2049593/3210986
+#[inline(always)]
+pub fn point_in_triangle (p: &[f64; 2], tri: &[[f64; 2]; 3]) -> bool
+{
+    let [v1, v2, v3] = tri;
+    let d1 = orientation(p, v1, v2);
+    let d2 = orientation(p, v2, v3);
+    let d3 = orientation(p, v3, v1);
+
+    let has_neg = (d1 < 0.) || (d2 < 0.) || (d3 < 0.);
+    let has_pos = (d1 > 0.) || (d2 > 0.) || (d3 > 0.);
+
+    return !(has_neg && has_pos);
+}
+
+/// Determine if the point is in the triangle using barycentric coordinates
+#[inline]
+pub fn point_in_triangle_bary(point: &[f64; 2], tri: &[[f64; 2]; 3]) -> bool {
     let (s, t) = barycentric(point, tri);
     return s >= 0. && t >= 0. && 1. - s - t >= 0.;
 }

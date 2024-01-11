@@ -6,6 +6,8 @@ use bevy::window::{CursorGrabMode, PrimaryWindow};
 use bevy_mod_wanderlust::ControllerInput;
 use bevy_rapier3d::prelude::*;
 use std::f32::consts::FRAC_2_PI;
+use bevy::core::Zeroable;
+use crate::terrain_render::MainTerrain;
 
 #[derive(Component, Default, Reflect)]
 #[reflect(Component)]
@@ -45,12 +47,16 @@ pub fn movement_input(
 
 pub fn mouse_look(
     mut cam: Query<&mut Transform, With<PlayerCam>>,
+    mut terrain: Query<&mut Transform, (With<MainTerrain>, Without<PlayerBody>, Without<PlayerCam>)>,
     mut body: Query<&mut Transform, (With<PlayerBody>, Without<PlayerCam>)>,
     // sensitivity: Res<Sensitivity>,
     mut input: EventReader<MouseMotion>,
 ) {
+    let mut terrain_tf = terrain.single_mut();
     let mut cam_tf = cam.single_mut();
     let mut body_tf = body.single_mut();
+
+
 
     // let sens = sensitivity.0;
     let sens = 1.0; // TODO: come back to this
@@ -76,6 +82,8 @@ pub fn mouse_look(
     body_tf.rotate(Quat::from_scaled_axis(
         rot * Vec3::Y * cumulative.x / 180.0 * sens,
     ));
+
+    terrain_tf.rotation = body_tf.rotation.inverse();
 }
 
 pub fn toggle_cursor_lock(

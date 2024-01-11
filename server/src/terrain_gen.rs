@@ -1,6 +1,6 @@
 use crate::terrain_data::{compressed_height, idx_to_coords, DATUM_COUNT, TILE_DIM};
 use crate::util::{lin_map, smooth_maximum_unit};
-use bevy::math::DVec3;
+use bevy::math::{DVec2, DVec3};
 use libnoise::prelude::*;
 /// Constants related to the resolution of the terrain signal
 ////// The amount of samples we take for the tile
@@ -135,6 +135,16 @@ impl TerrainGenerator {
         let dy = self.get_height_for(x, y + D) - terrain_height;
 
         return DVec3::new(-dx / D, 1.0, -dy / D).normalize();
+    }
+
+    pub fn get_gradient(&self, x: f64, y: f64) -> DVec2 {
+        let terrain_height = self.get_height_for(x, y);
+
+        let dx = self.get_height_for(x + D, y) - terrain_height;
+
+        let dy = self.get_height_for(x, y + D) - terrain_height;
+
+        return DVec2::new(dx / D, dy / D);
     }
 
     /// The formula here is simply

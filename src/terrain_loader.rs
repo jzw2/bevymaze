@@ -1,136 +1,88 @@
-use crate::terrain_render::{
-    create_lattice_plane, transform_lattice_positions, TERRAIN_VERTICES, X_VIEW_DISTANCE,
-    Z_VIEW_DISTANCE,
-};
-use bevy::prelude::Mesh;
-use bevy_easings::Lerp;
-use futures_util::{FutureExt, SinkExt, Stream, StreamExt, TryFutureExt};
-use log::*;
-use server::terrain_data::TerrainTile;
-use server::terrain_gen::TILE_SIZE;
-use server::util::{cart_to_polar, lin_map, polar_to_cart};
-use std::arch::asm;
-use std::f64::consts::PI;
-use std::io::BufReader;
-use tokio::net::TcpStream;
-use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::{
-    connect_async,
-    tungstenite::{Error, Result},
-    MaybeTlsStream, WebSocketStream,
-};
-use url::Url;
-
+use bevy::ecs::system::CommandQueue;
+// use std::net::TcpStream;
+use crate::terrain_render::*;
+use bevy::math::DVec2;
+use bevy::prelude::*;
+use bevy::render::mesh::VertexAttributeValues::Float32x3;
+use bevy::tasks::{AsyncComputeTaskPool, Task};
+use futures_util::SinkExt;
 use kiddo::KdTree;
-use kiddo::NearestNeighbour;
-use kiddo::SquaredEuclidean;
+use server::terrain_data::TerrainTile;
+// use tokio_tungstenite::MaybeTlsStream;
+use crate::player_controller::{PlayerBody, PlayerCam};
+use tokio_tungstenite_wasm::*;
 
-struct TileData {
-    data: Vec<Vec<f64>>,
-}
+/// Quarter meter data tolerance when the player is 1m away
+const DATA_TOLERANCE: f32 = 0.25;
 
-/// We get the height of the terrain at a certain point based off of the LOD
-/// We use bilinear filtering
-/// We calculate the appropriate LOD based off the density for a particular section
-pub async fn get_height(
-    x: f64,
-    z: f64,
-    center_coords: (i32, i32),
-    socket: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
-) -> f64 {
-    // The coordinates of the point's chunk
-    let chunk_x = (x / TILE_SIZE).floor();
-    let chunk_z = (z / TILE_SIZE).floor();
-    let chunk = get_chunk((chunk_x as i32, chunk_z as i32), center_coords, socket).await;
-    return chunk.get_height(x - chunk_x * TILE_SIZE, z - chunk_z * TILE_SIZE);
-}
+#[derive(Resource)]
+struct ServerConnection(WebSocketStream);
 
-/// We get the height of the terrain at a certain point based off of the LOD
-/// We use bilinear filtering
-/// We calculate the appropriate LOD based off the density for a particular section
-pub fn get_chunk_height(x: f64, z: f64, chunk: TerrainTile) -> f64 {
-    // The coordinates of the point's chunk
-    let chunk_x = (x / TILE_SIZE).floor();
-    let chunk_z = (z / TILE_SIZE).floor();
-    return chunk.get_height(x - chunk_x * TILE_SIZE, z - chunk_z * TILE_SIZE);
-}
+#[derive(Resource)]
+struct TerrainData(KdTree<f64, 2>);
 
-/// Gets the area of this chunk in lattice space
-/// Used to get the LOD level because the area is proportional to the number of lattice points
-fn get_lattice_space_area(chunk_coords: (i32, i32), center_coords: (i32, i32)) -> f64 {
-    let normalized_coordinates = (
-        chunk_coords.0 - center_coords.0,
-        chunk_coords.1 - center_coords.1,
-    );
-    return match normalized_coordinates {
-        // the "origin" chunks are best approximated by quarters of circles with a little extra
-        (0, 0) | (0, -1) | (-1, -1) | (-1, 0) => {
-            PI / 8. * (7. * TILE_SIZE.asinh().powi(2) - (TILE_SIZE * 2.0f64.sqrt()).asinh().powi(2))
-        }
-        n_c => {
-            // first get the vertices of the chunk/tile
-            let p1 = (TILE_SIZE * n_c.0 as f64, TILE_SIZE * n_c.1 as f64);
-            let p2 = (TILE_SIZE * (n_c.0 + 1) as f64, TILE_SIZE * n_c.1 as f64);
-            let p3 = (
-                TILE_SIZE * (n_c.0 + 1) as f64,
-                TILE_SIZE * (n_c.1 + 1) as f64,
-            );
-            let p4 = (TILE_SIZE * n_c.0 as f64, TILE_SIZE * (n_c.1 + 1) as f64);
-            // now transform to polar form
-            let p1 = cart_to_polar(p1);
-            let p2 = cart_to_polar(p2);
-            let p3 = cart_to_polar(p3);
-            let p4 = cart_to_polar(p4);
-            // map from tile space to lattice space & back to cartesian rep
-            let p1 = polar_to_cart((p1.0.asinh(), p1.1));
-            let p2 = polar_to_cart((p2.0.asinh(), p2.1));
-            let p3 = polar_to_cart((p3.0.asinh(), p3.1));
-            let p4 = polar_to_cart((p4.0.asinh(), p4.1));
-            // finally we use the shoelace formula to get the area
-            fn det(p1: &(f64, f64), p2: &(f64, f64)) -> f64 {
-                // treat p1 and p2 like column vectors
-                p1.0 * p2.1 - p1.1 * p2.0
+#[derive(Component)]
+struct FetchHeightDataTask(Task<CommandQueue>);
+
+fn request_terrain_vertices(
+    mut commands: Commands,
+    terrain_transform: Query<
+        &mut Transform,
+        (With<MainTerrain>, Without<PlayerBody>, Without<PlayerCam>),
+    >,
+    terrain_mesh: Query<&Handle<Mesh>, With<MainTerrain>>,
+    meshes: Res<Assets<Mesh>>,
+    terrain_data_map: ResMut<TerrainDataMap>,
+    terrain_data: ResMut<TerrainData>,
+    mut socket: ResMut<ServerConnection>,
+) {
+    let thread_pool = AsyncComputeTaskPool::get();
+    // we get which vertices need to be fetched
+    let terrain_handle = terrain_mesh.get_single().unwrap();
+    let terrain = meshes.get(terrain_handle).unwrap();
+    let terrain_tf = terrain_transform.get_single().unwrap();
+    if let Some(Float32x3(verts)) = terrain.attribute(Mesh::ATTRIBUTE_POSITION) {
+        for vert in verts {
+            let orig = Vec3::from(*vert);
+            let actual_pos = orig + terrain_tf.translation;
+            let origin_dist = orig.length();
+            let check_radius = origin_dist * DATA_TOLERANCE;
+            // now we check the data map
+            if !terrain_data_map.data_exists(Square::new(
+                &DVec2::from(actual_pos.xz()).to_array(),
+                check_radius as f64,
+            )) {
+                // we need to fetch the data!
+                // make a call to the server?
+                let entity = commands.spawn_empty().id();
+                let task = thread_pool.spawn(async move {
+                    socket.0.send(Message::Binary())
+                });
+                // Spawn new entity and add our new task as a component
+                commands.entity(entity).insert(FetchHeightDataTask(task));
             }
-            0.5 * (det(&p1, &p2) + det(&p2, &p3) + det(&p3, &p4) + det(&p4, &p1))
         }
-    };
+    }
 }
 
-fn get_lod(chunk_coords: (i32, i32), center_coords: (i32, i32)) -> u32 {
-    // we first get the lattice points per unit of area
-    let x_bound = (X_VIEW_DISTANCE as f64 * TILE_SIZE).asinh();
-    let z_bound = (Z_VIEW_DISTANCE as f64 * TILE_SIZE).asinh();
-    let total_area = x_bound * z_bound * PI; // area of an ellipse a*b*pi
-    let verts_per_area = TERRAIN_VERTICES as f64 / total_area;
-    // now get our number of vertices
-    let verts = get_lattice_space_area(chunk_coords, center_coords) * verts_per_area;
-    // finally select the LOD
-    // make sure the LOD has around twice the number of data points as the number of verts we chose
-    return (10. - 0.5 * (2. * verts).log2()).min(10.).max(0.).ceil() as u32;
-}
+// pub async fn get_height(
+//     chunk_coords: (i32, i32),
+//     center_coords: (i32, i32),
+//     socket: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
+// ) -> TerrainTile {
+//     let lod = get_lod(chunk_coords, center_coords);
+//     socket
+//         .send(Message::Text(format!(
+//             "{},{}:{lod}",
+//             chunk_coords.0, chunk_coords.1
+//         )))
+//         .await
+//         .expect("Failed to send for chunk");
+//     let msg = socket.next().await.expect("Can't fetch chunk");
+//     return TerrainTile::from(msg.unwrap().into_data());
+// }
 
-pub async fn get_chunk(
-    chunk_coords: (i32, i32),
-    center_coords: (i32, i32),
-    socket: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
-) -> TerrainTile {
-    let lod = get_lod(chunk_coords, center_coords);
-    socket
-        .send(Message::Text(format!(
-            "{},{}:{lod}",
-            chunk_coords.0, chunk_coords.1
-        )))
-        .await
-        .expect("Failed to send for chunk");
-    let msg = socket.next().await.expect("Can't fetch chunk");
-    return TerrainTile::from(msg.unwrap().into_data());
-}
-
-pub fn get_required_data(
-    center: (i32, i32),
-    lattice: &Vec<(i32, i32)>,
-    data: &mut KdTree<f64, 2>,
-) -> Vec<(i32, i32)> {
+pub fn get_required_data(socket: &mut WebSocketStream) -> Vec<(i32, i32)> {
     let mut to_fetch = vec![];
     /*
     // iterate over all the vertices in our terrain mesh
@@ -145,4 +97,203 @@ pub fn get_required_data(
         }
     }*/
     return to_fetch;
+}
+
+#[derive(Resource)]
+pub struct TerrainDataMap {
+
+}
+
+pub struct TerrainDataPoint {
+    coordinates: [f64; 2],
+    height: f64,
+}
+
+pub struct Square {
+    side: i32,
+    top_left: [i32; 2],
+}
+
+/// How much the nodes are rounded by
+const ACCURACY: f64 = 0.25;
+
+impl TerrainDataMap {
+    pub fn new() -> Self {
+        return TerrainDataMap {
+            data_existence: HashSet::new(),
+            height_data: HashMap::new(),
+        };
+    }
+
+    pub fn insert(&mut self, data: TerrainDataPoint) {
+        // unpack the coordinates
+        let [x, y] = data.coordinates;
+        // convert to pos on smallest grid
+        let [x, y] = [(x / ACCURACY).round() as i32, (y / ACCURACY).round() as i32];
+        /// we insert ourselves at every level
+        /// technically not necessary, but easy
+        for level in 0..=TREE_DEPTH {
+            let cell_size = TREE_LARGE_NODE >> level;
+            // convert to pos on current grid
+            let [x, y] = [x.div_euclid(cell_size), y.div_euclid(cell_size)];
+            self.data_existence.insert(([x, y], level));
+        }
+        self.height_data.insert([x, y], data);
+    }
+
+    pub fn remove(&mut self, coords: &[f64; 2]) {
+        // unpack the coordinates
+        let [x, y] = coords;
+        // convert to pos on smallest grid
+        let [x, y] = [(x / ACCURACY).round() as i32, (y / ACCURACY).round() as i32];
+        // remove data point
+        self.height_data.remove(&[x, y]);
+        self.data_existence.remove(&([x, y], TREE_DEPTH));
+        for level in (0..TREE_DEPTH).rev() {
+            // check the children at each level
+            let cell_size = TREE_LARGE_NODE >> level;
+            // convert to pos on current grid
+            let [x, y] = [x.div_euclid(cell_size), y.div_euclid(cell_size)];
+            let mut exists = false;
+            for i in 0..2 {
+                for j in 0..2 {
+                    let cell = ([x * 2 + i, y * 2 + j], level + 1);
+                    exists |= self.data_existence.contains(&cell);
+                }
+            }
+            if !exists {
+                self.data_existence.remove(&([x, y], level));
+            }
+        }
+    }
+
+    /// Determine if terrain data exists within the square
+    /// We don't need to to know what the data is, only if it exists
+    pub fn data_exists(&self, square: Square) -> bool {
+        // get all the top level squares that we can
+        let mut to_check = VecDeque::<([i32; 2], i32)>::new();
+        let horiz_beg = square.top_left[0].div_euclid(TREE_LARGE_NODE);
+        let horiz_end = (square.top_left[0] + square.side).div_euclid(TREE_LARGE_NODE);
+        let vert_beg = square.top_left[1].div_euclid(TREE_LARGE_NODE);
+        let vert_end = (square.top_left[1] + square.side).div_euclid(TREE_LARGE_NODE);
+        for x in horiz_beg..=horiz_end {
+            for y in vert_beg..=vert_end {
+                let cell = ([x, y], 0);
+                if self.data_existence.contains(&cell) {
+                    if square.contains(&cell) {
+                        return true;
+                    }
+                    // it's not entirely contained, so check it's children
+                    to_check.push_back(([x, y], 0));
+                }
+            }
+        }
+        while !to_check.is_empty() {
+            let ([x, y], depth) = to_check.pop_front().unwrap();
+            if depth >= TREE_DEPTH {
+                continue;
+            }
+            // check the four children of this cell
+            for i in 0..2 {
+                for j in 0..2 {
+                    let cell = ([x * 2 + i, y * 2 + j], depth + 1);
+                    if self.data_existence.contains(&cell) {
+                        if square.contains(&cell) {
+                            // if it's entirely contained and contains data, we can return early
+                            return true;
+                        }
+                        // it's not entirely contained, so check it's children
+                        to_check.push_back(cell);
+                    }
+                }
+            }
+        }
+        return false;
+    }
+}
+
+#[test]
+fn terrain_data_map_insert_test() {
+    let mut dmap = TerrainDataMap::new();
+    dmap.insert(TerrainDataPoint {
+        coordinates: [0., 0.],
+        height: 1000.,
+    });
+
+    dmap.insert(TerrainDataPoint {
+        coordinates: [0.33, 0.33],
+        height: 1000.,
+    });
+    for ([x, y], d) in dmap.data_existence {
+        println!("{} [{}, {}]", d, x, y);
+    }
+}
+
+#[test]
+fn terrain_data_remove_test() {
+    let mut dmap = TerrainDataMap::new();
+    dmap.insert(TerrainDataPoint {
+        coordinates: [0., 0.],
+        height: 1000.,
+    });
+
+    dmap.insert(TerrainDataPoint {
+        coordinates: [0.33, 0.33],
+        height: 1000.,
+    });
+
+    {
+        assert_eq!(dmap.data_existence.len(), 22);
+    }
+    dmap.remove(&[0.33, 0.33]);
+    {
+        assert_eq!(dmap.data_existence.len(), 21)
+    }
+    dmap.remove(&[0., 0.]);
+    {
+        assert_eq!(dmap.data_existence.len(), 0)
+    }
+    for ([x, y], d) in dmap.data_existence {
+        println!("{} [{}, {}]", d, x, y);
+    }
+}
+
+#[test]
+fn terrain_data_check_test() {
+    let mut dmap = TerrainDataMap::new();
+    dmap.insert(TerrainDataPoint {
+        coordinates: [0., 0.],
+        height: 1000.,
+    });
+
+    dmap.insert(TerrainDataPoint {
+        coordinates: [0.33, 0.33],
+        height: 1000.,
+    });
+    assert!(dmap.data_exists(Square {
+        side: 10,
+        top_left: [0, 0],
+    }));
+
+    assert!(!dmap.data_exists(Square {
+        side: 14,
+        top_left: [-15, -15],
+    }));
+
+    dmap.insert(TerrainDataPoint {
+        coordinates: [-3.26, -3.268],
+        height: 1000.,
+    });
+    for ([x, y], d) in &dmap.data_existence {
+        let sqr = Square {
+            side: 14,
+            top_left: [-15, -15],
+        };
+        println!("{} [{}, {}] {}", d, x, y, sqr.contains(&([*x, *y], *d)));
+    }
+
+    assert!(dmap.data_exists(Square {
+        side: 14,
+        top_left: [-15, -15],
+    }));
 }

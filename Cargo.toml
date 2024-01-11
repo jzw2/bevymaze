@@ -12,7 +12,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bevy = { version = "0.12.0"}
+bevy = { version = "0.12.1" }
 image = "0.24.6"
 imageproc = "0.23.0"
 petgraph = "0.6.3"
@@ -34,17 +34,18 @@ bevy_framepace = "0.14.1"
 aether_spyglass = { path = "../aether_spyglass" }
 log = "0.4.20"
 futures-util = "0.3.29"
-tokio-tungstenite = "0.20.1"
 url = "2.4.1"
 env_logger = "0.10.0"
-tokio = "1.33.0"
 bevy_easings = "0.12.2"
-hilbert = "0.1.2"
 fixed = "1.24.0"
 async-stream = "0.3.5"
 bevy_atmosphere = "0.8.1"
-kiddo = "3.0.0"
 caches = "0.2.7"
 libnoise = "1.0.0"
 bevy_mod_debugdump = "0.9.0"
 bitvec = "1.0.1"
+console_error_panic_hook = "0.1.7"
+wasm-bindgen = "0.2.89"
+web-sys = "0.3.66"
+tokio-tungstenite-wasm = "0.2.1"
+kiddo = "4.0.0"

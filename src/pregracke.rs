@@ -1,19 +1,20 @@
-//use crate::terrain_render::{X_VIEW_DIST_M, Z_VIEW_DIST_M};
+use crate::terrain_render::{X_VIEW_DIST_M, Z_VIEW_DIST_M};
 use bitvec::array::BitArray;
 use bitvec::{bitarr, bits, bitvec};
 use delaunator::{triangulate, Point, Triangulation};
-use image::{Pixel, Rgba, RgbaImage};
+use image::{GenericImage, GenericImageView, Pixel, Rgba, RgbaImage};
 use imageproc::drawing::{draw_filled_circle_mut, draw_line_segment_mut, draw_text_mut};
 use imageproc::drawing::{Blend, Canvas};
-use rand::{thread_rng, Rng};
-use server::util::{intersects_tri, lin_map};
+use rand::rngs::StdRng;
+use rand::{thread_rng, Rng, SeedableRng};
+use rusttype::{Font, Scale};
+use server::util::{point_in_triangle_bary, lin_map};
 use std::mem::swap;
 use std::rc::Rc;
 use std::time::Instant;
-use rusttype::{Font, Scale};
 
-const X_VIEW_DIST_M: f64 = 10.;
-const Z_VIEW_DIST_M: f64 = 10.;
+// const X_VIEW_DIST_M: f64 = 10.;
+// const Z_VIEW_DIST_M: f64 = 10.;
 
 fn spaces(num: usize) -> String {
     let mut s = "".to_string();
@@ -126,9 +127,10 @@ impl PregrackeHeirarchy {
         mut triangles: &mut Vec<[usize; 3]>,
         mut meta: &mut Vec<(usize, f64)>,
         depth: usize,
+        node: usize,
     ) {
         //print!("{} {} {}\n", beg, end, depth);
-        if end as i32 - beg as i32 <= 1 {
+        if end as i32 - beg as i32 <= 0 {
             return;
         }
 
@@ -137,33 +139,30 @@ impl PregrackeHeirarchy {
         // we select a pivot by selecting the median of all the vertices of the bounding boxes
         centroids[beg..end].select_nth_unstable_by(mid, |a, b| a[axis].total_cmp(&b[axis]));
         let pivot = centroids[mid];
+
         // now sort the triangles s.t. intersects is lowest, left is middle, and right is highest
         let (shared_end, left_end) =
             sort_triangles_around_axis(beg, end, &mut triangles, &vertices, pivot[axis], axis);
         let shared_beg = beg;
+        let left_beg = shared_end;
+        let right_beg = left_end;
         let right_end = end;
-        //println!("{}{} | {} {} | {} {} | {} {} | {}", spaces(depth), beg, shared_beg, shared_end, shared_end, left_end, left_end, right_end, end);
-        // finally recurse on our three groups
-        // make sure we aren't repeating our selves
-        // if the shared is exactly equal to the original, don't recurse
-        if shared_beg == beg && shared_end == end {
-            return;
+
+        let len = end - beg;
+        let shared_len = shared_end - shared_beg;
+        let left_len = left_end - left_beg;
+        let right_len = end - beg - (shared_len + left_len);
+
+        // store the pivot of the children and our total length
+        if node >= meta.len() {
+            // extend the metadata
+            // + 1 for magic and + 2 because we want at least two more children
+            meta.append(&mut vec![(0, f64::NAN); node - meta.len() + 1 + 2]);
         }
+        meta[node] = (end - beg, pivot[axis]);
 
-        println!(
-            "{}Meta {} {} {}, {} {}",
-            spaces(depth),
-            depth,
-            beg,
-            end,
-            depth + beg,
-            end - beg
-        );
-        meta[beg + depth] = (end - beg, pivot[axis]);
-
-        if shared_beg != beg || shared_end != end {
-            //print!("{}Shared ", spaces(depth+1));
-            //println!("{}Shared {} {} {}", spaces(depth+1), shared_beg, shared_end, depth + 1);
+        // terminate if we are repeating ourselves
+        if shared_len > 3 && shared_len != len {
             PregrackeHeirarchy::construct_inner(
                 shared_beg,
                 shared_end,
@@ -172,46 +171,36 @@ impl PregrackeHeirarchy {
                 triangles,
                 meta,
                 depth + 1,
+                3 * node + 1,
             );
-            //meta[shared_beg + depth] = shared_end - shared_beg;
         }
-        if shared_end != beg || left_end != end {
-            //print!("{}Left ", spaces(depth+1));
-            //println!("{}Left {} {} {}", spaces(depth+1), shared_end, left_end, depth + 1);
+        if left_len > 3 && left_len != len {
             PregrackeHeirarchy::construct_inner(
-                shared_end,
+                left_beg,
                 left_end,
                 &vertices,
                 centroids,
                 triangles,
                 meta,
                 depth + 1,
+                3 * node + 2,
             );
-            //meta[shared_end + depth] = left_end - shared_end;
         }
-        if left_end != beg || right_end != end {
-            //print!("{}Right ", spaces(depth+1));
-            //println!("{}Right {} {} {}", spaces(depth+1), left_end, right_end, depth + 1);
+        if right_len > 3 && right_len != len {
             PregrackeHeirarchy::construct_inner(
-                left_end,
+                right_beg,
                 right_end,
                 &vertices,
                 centroids,
                 triangles,
                 meta,
                 depth + 1,
+                3 * node + 3,
             );
-            //meta[left_end + depth] = right_end - left_end;
         }
     }
 
     fn construct(vertices: &Vec<[f64; 2]>, triangulation: &Triangulation) -> Self {
-        // first find a suitable midline
-        let mut verts: Vec<(usize, [f64; 2])> = vertices
-            .iter()
-            .enumerate()
-            .map(|(idx, p)| (idx, *p))
-            .collect();
         let mut triangles: Vec<[usize; 3]> = vec![[0, 0, 0]; triangulation.len()];
         for i in 0..triangulation.len() {
             triangles[i] = [
@@ -220,8 +209,9 @@ impl PregrackeHeirarchy {
                 triangulation.triangles[3 * i + 2],
             ];
         }
-        let mut meta: Vec<(usize, f64)> =
-            vec![(0, 0.); triangulation.len() + triangulation.len() / 2];
+        let meta_len = triangulation.len()
+            * ((triangulation.len() as f64).log2() / 3.0f64.log2()).ceil() as usize;
+        let mut meta: Vec<(usize, f64)> = vec![(0, f64::NAN); meta_len];
         let mut centroids: Vec<[f64; 2]> = triangles
             .iter()
             .map(|t| {
@@ -234,6 +224,7 @@ impl PregrackeHeirarchy {
         let depth = 0;
         let beg = 0;
         let end = triangulation.len();
+        // print!("M");
         PregrackeHeirarchy::construct_inner(
             beg,
             end,
@@ -242,6 +233,7 @@ impl PregrackeHeirarchy {
             &mut triangles,
             &mut meta,
             depth,
+            0,
         );
         return PregrackeHeirarchy {
             vertices: vertices.clone(),
@@ -250,117 +242,83 @@ impl PregrackeHeirarchy {
         };
     }
 
-    fn locate_inner(&self, query: &[f64; 2], beg: usize, end: usize, depth: usize) -> usize {
+    fn locate_inner(
+        &self,
+        query: &[f64; 2],
+        beg: usize,
+        end: usize,
+        depth: usize,
+        node: usize,
+    ) -> usize {
         // make sure there's actually things to check
         let len = end as i32 - beg as i32;
-        println!(
-            "{}{} a:{} beg: {} end: {} len: {}",
-            spaces(depth),
-            depth,
-            depth % 2,
-            beg,
-            end,
-            len
-        );
         if len <= 0 {
             return usize::MAX;
-        } else if len == 1 {
-            if intersects_tri(query, &self.get_tri(beg)) {
-                return beg;
-            } else {
-                return usize::MAX;
-            }
         }
-        let axis = depth % 2;
-        let total = self.meta[beg + depth].0;
-        // if this is a leaf node (or effective leaf node)
-        // we can search the children right now
-        // we won't need to check any of the children if they
-        if total == self.meta[beg + depth + 1].0 || total == 0 {
-            //if bounding_box(&self.get_tri(beg))[0][axis] <= query[axis] && query[axis] <= bounding_box(&self.get_tri(end-1))[1][axis] {
-            for i in beg..end {
-                if intersects_tri(&query, &self.get_tri(i)) {
-                    return i;
-                }
-            }
-            //} else {
+        // also make sure we are still in the array
+        if node >= self.meta.len() {
             return usize::MAX;
-            //}
+        }
+        // make sure this is a valid child
+        let us = self.meta[node];
+        if us.1.is_nan() {
+            return usize::MAX;
+        }
+        // check if we have any children
+        // if we don't, then check us since we are a leaf
+        // TODO add optimization where we only check the triangles based on pivot
+        let axis = depth % 2;
+        if 3 * node + 1 >= self.meta.len() {
+            return self.check_leaf(&query, beg, end, us, axis);
+        }
+
+        let shared_len = self.meta[3 * node + 1].0;
+        let left_len = self.meta[3 * node + 2].0;
+        let right_len = self.meta[3 * node + 3].0;
+        if shared_len + right_len + left_len == 0 {
+            return self.check_leaf(&query, beg, end, us, axis);
         }
 
         // if this thing is the leaf, then don't do anything.
-        let shared_len = self.meta[beg + depth + 1].0;
-        let left_len = self.meta[beg + depth + shared_len + 1].0;
-        println!(
-            "{}{} a:{} total: {} beg: {} end: {}  shared: {} left: {}",
-            spaces(depth),
-            depth,
-            axis,
-            total,
-            beg,
-            end,
-            shared_len,
-            left_len
-        );
-        let right_len = (end - beg) - (shared_len + left_len);
         let shared_beg = beg;
         let shared_end = shared_beg + shared_len;
         let left_beg = shared_end;
         let left_end = left_beg + left_len;
         let right_beg = left_end;
         let right_end = right_beg + right_len;
-        println!("{}{} a:{} total: {} sl: {} ll: {} rl: {} | beg: {} sb: {} se: {} lb: {} le: {} rb: {} re: {} end: {}", spaces(depth), depth, axis, total, 
-                 shared_len, left_len, right_len,
-                 beg, shared_beg, shared_end, left_beg, left_end, right_beg, right_end, end);
-
-        println!(
-            "{}{} SHARED a:{} total: {} beg: {} sbeg: {} send: {} end: {}",
-            spaces(depth),
-            depth,
-            axis,
-            total,
-            beg,
-            shared_beg,
-            shared_end,
-            end
-        );
-        let shared_res = self.locate_inner(query, shared_beg, shared_end, depth + 1);
+        // check the shared
+        let shared_res = self.locate_inner(query, shared_beg, shared_end, depth + 1, 3 * node + 1);
         if shared_res != usize::MAX {
             return shared_res;
         }
 
-        if query[axis] < self.meta[beg + depth].1 {
-            // check the left branch
-            println!(
-                "{}{} LEFT a:{} total: {} beg: {} lbeg: {} lend: {} end: {}",
-                spaces(depth),
-                depth,
-                axis,
-                total,
-                beg,
-                left_beg,
-                left_end,
-                end
-            );
-            return self.locate_inner(query, left_beg, left_end, depth + 1);
+        // then check the relevant child
+        if query[axis] < us.1 {
+            return self.locate_inner(query, left_beg, left_end, depth + 1, 3 * node + 2);
         } else {
-            println!(
-                "{}{} RIGHT a:{} total: {} beg: {} rbeg: {} rend: {} end: {}",
-                spaces(depth),
-                depth,
-                axis,
-                total,
-                beg,
-                right_beg,
-                right_end,
-                end
-            );
-            return self.locate_inner(query, right_beg, right_end, depth + 1);
+            return self.locate_inner(query, right_beg, right_end, depth + 1, 3 * node + 3);
         }
     }
 
+    fn check_leaf(&self, query: &[f64; 2], beg: usize, end: usize, us: (usize, f64), axis: usize) -> usize {
+        // check which side of the pivot we are on
+        let our_side = if query[axis] < us.1 { -1 } else { 1 };
+        let triangle_side = triangle_intersects_axis(&self.get_tri(beg), us.1, axis);
+        if -1 * our_side == triangle_side {
+            // this means they are on opposite sides!
+            return usize::MAX;
+        }
+
+        for i in beg..end {
+            if point_in_triangle_bary(&query, &self.get_tri(i)) {
+                return i;
+            }
+        }
+        return usize::MAX;
+    }
+
     fn locate(&self, query: &[f64; 2]) -> usize {
-        return self.locate_inner(query, 0, self.data.len(), 0);
+        return self.locate_inner(query, 0, self.data.len(), 0, 0);
     }
 }
 
@@ -368,16 +326,21 @@ impl PregrackeHeirarchy {
 fn create_and_find_bench() {
     let mut queries = vec![];
     let mut points = vec![];
-    for x in 0..4 {
-        for y in 0..4 {
+    let mut r = StdRng::seed_from_u64(222);
+    for x in 0..100 {
+        for y in 0..1000 {
             points.push([
-                thread_rng().gen_range(-X_VIEW_DIST_M..X_VIEW_DIST_M),
-                thread_rng().gen_range(-Z_VIEW_DIST_M..Z_VIEW_DIST_M),
+                r.gen_range(-X_VIEW_DIST_M.asinh()..X_VIEW_DIST_M.asinh())
+                    .sinh(),
+                r.gen_range(-Z_VIEW_DIST_M.asinh()..Z_VIEW_DIST_M.asinh())
+                    .sinh(),
             ]);
-            if queries.len() < 10000 {
+            if queries.len() < 40000 {
                 queries.push([
-                    thread_rng().gen_range(-X_VIEW_DIST_M..X_VIEW_DIST_M),
-                    thread_rng().gen_range(-Z_VIEW_DIST_M..Z_VIEW_DIST_M),
+                    r.gen_range(-X_VIEW_DIST_M.asinh()..X_VIEW_DIST_M.asinh())
+                        .sinh(),
+                    r.gen_range(-Z_VIEW_DIST_M.asinh()..Z_VIEW_DIST_M.asinh())
+                        .sinh(),
                 ]);
             }
         }
@@ -407,34 +370,48 @@ fn create_and_find_bench() {
             triangulation.triangles[3 * i + 2],
         ];
     }
-    draw_debug("original_tris.png", &points, &triangles);
-    draw_debug("modified_tris.png", &ph.vertices, &ph.data);
-    println!("Splits:");
-    for i in ph.meta.iter().enumerate() {
-        println!("{:?}", i);
-    }
-    println!("Vertices:");
-    for i in ph.vertices.iter().enumerate() {
-        println!("{:?}", i);
-    }
-    println!("Triangles:");
-    for i in ph.data.iter().enumerate() {
-        println!("{:?}", i);
-    }
+    // println!("Splits:");
+    // for i in ph.meta.iter().enumerate() {
+    //     println!("{:?}", i);
+    // }
+    // println!("Vertices:");
+    // for i in ph.vertices.iter().enumerate() {
+    //     println!("{:?}", i);
+    // }
+    // println!("Triangles:");
+    // for i in ph.data.iter().enumerate() {
+    //     println!("{:?}", i);
+    // }
+    //
+    // draw_debug(None, "original_tris.png", &points, &triangles);
+    // draw_debug(Some(&ph), "modified_tris.png", &ph.vertices, &ph.data);
+
+    let now = Instant::now();
     for q in &queries {
-        let mut found = usize::MAX;
-        for (i, tri) in ph.data.iter().enumerate() {
-            // first locate the point
-            if intersects_tri(q, &ph.get_tri(i)) {
-                found = i;
-                break;
-            }
-        }
-        assert_eq!(found, ph.locate(q));
+        ph.locate(q);
     }
+    let elapsed = now.elapsed();
+    println!("Locating elapsed: {:.7?}", elapsed);
+
+    // for q in &queries {
+    //     let mut found = usize::MAX;
+    //     for (i, tri) in ph.data.iter().enumerate() {
+    //         // first locate the point
+    //         if intersects_tri(q, &ph.get_tri(i)) {
+    //             found = i;
+    //             break;
+    //         }
+    //     }
+    //     assert_eq!(found, ph.locate(q));
+    // }
 }
 
-fn draw_debug(path: &str, vertices: &Vec<[f64; 2]>, triangles: &Vec<[usize; 3]>) {
+fn draw_debug(
+    ph: Option<&PregrackeHeirarchy>,
+    path: &str,
+    vertices: &Vec<[f64; 2]>,
+    triangles: &Vec<[usize; 3]>,
+) {
     // Background color
     let white = Rgba([255u8, 255u8, 255u8, 255u8]);
 
@@ -449,7 +426,8 @@ fn draw_debug(path: &str, vertices: &Vec<[f64; 2]>, triangles: &Vec<[usize; 3]>)
     // The implementation of Canvas for GenericImage overwrites existing pixels
     let mut image = RgbaImage::from_pixel(dim, dim, white);
 
-    let font = Vec::from(include_bytes!("/Library/Fonts/Arial Unicode.ttf") as &[u8]);
+    let font =
+        Vec::from(include_bytes!("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf") as &[u8]);
     let font = Font::try_from_vec(font).unwrap();
 
     let height = 24.;
@@ -458,6 +436,121 @@ fn draw_debug(path: &str, vertices: &Vec<[f64; 2]>, triangles: &Vec<[usize; 3]>)
         x: height,
         y: height,
     };
+
+    if let Some(ph) = ph {
+        fn draw_split(
+            image: &mut RgbaImage,
+            dim: u32,
+            ph: &PregrackeHeirarchy,
+            beg: usize,
+            end: usize,
+            depth: usize,
+            node: usize,
+            font: &Font,
+            label: &str,
+        ) {
+            let height = 24.;
+
+            let scale = Scale {
+                x: height,
+                y: height,
+            };
+
+            let purple = Rgba([255u8, (depth * 50) as u8, (255 - depth * 50) as u8, 255u8]);
+            // println!("{}", (depth * 100) as u8);
+            let axis = depth % 2;
+
+            let len = end as i32 - beg as i32;
+            if len <= 1 {
+                return;
+            }
+            if node > ph.meta.len() {
+                return;
+            }
+            let total = ph.meta[node].0;
+            if total == 0 {
+                return;
+            }
+
+            let x = lin_map(
+                -X_VIEW_DIST_M,
+                X_VIEW_DIST_M,
+                0.,
+                dim as f64,
+                ph.meta[beg + depth].1,
+            ) as f32;
+            let z1 = 0.;
+            let z2 = dim as f32;
+
+            let mut text_pos = (
+                x.round() as i32,
+                ((z1 + z2) / 2.0).round() as i32 + 30 * depth as i32,
+            );
+            if axis == 0 {
+                draw_line_segment_mut(image, (x, z1), (x, z2), purple);
+            } else {
+                draw_line_segment_mut(image, (z1, x), (z2, x), purple);
+                text_pos = (text_pos.1, text_pos.0);
+            }
+
+            draw_text_mut(image, purple, text_pos.0, text_pos.1, scale, &font, label);
+
+            if 3 * node + 1 >= ph.meta.len() {
+                return;
+            }
+
+            let shared_len = ph.meta[3 * node + 1].0;
+            let left_len = ph.meta[3 * node + 2].0;
+            let right_len = (end - beg) - (shared_len + left_len);
+            let shared_beg = beg;
+            let shared_end = shared_beg + shared_len;
+            let left_beg = shared_end;
+            let left_end = left_beg + left_len;
+            let right_beg = left_end;
+            let right_end = right_beg + right_len;
+
+            draw_split(
+                image,
+                dim,
+                ph,
+                shared_beg,
+                shared_end,
+                depth + 1,
+                3 * node + 1,
+                font,
+                format!("Shared {}", depth + 1).as_str(),
+            );
+            draw_split(
+                image,
+                dim,
+                ph,
+                left_beg,
+                left_end,
+                depth + 1,
+                3 * node + 2,
+                font,
+                format!("Left {}", depth + 1).as_str(),
+            );
+            draw_split(
+                image,
+                dim,
+                ph,
+                right_beg,
+                right_end,
+                depth + 1,
+                3 * node + 3,
+                font,
+                format!("Right {}", depth + 1).as_str(),
+            );
+        }
+
+        draw_split(&mut image, dim, ph, 0, ph.meta.len(), 0, 0, &font, "Main 0");
+        // // first split
+        // let x = lin_map(-X_VIEW_DIST_M, X_VIEW_DIST_M, 0., dim as f64, ph.meta[0].1) as f32;
+        // let z1 = 0.;
+        // let z2 = dim as f32;
+        // draw_line_segment_mut(&mut image, (x, z1), (x, z2), purple);
+    }
 
     for [aidx, bidx, cidx] in triangles {
         let a = vertices[*aidx];
@@ -535,30 +628,30 @@ fn draw_debug(path: &str, vertices: &Vec<[f64; 2]>, triangles: &Vec<[usize; 3]>)
         let at = format!("{}", *aidx);
         let bt = format!("{}", *bidx);
         let ct = format!("{}", *cidx);
-        draw_text_mut(&mut image, blue, ai.0, ai.1, scale, &font, &at.as_str()); 
-        draw_text_mut(&mut image, blue, bi.0, bi.1, scale, &font, &bt.as_str()); 
-        draw_text_mut(&mut image, blue, ci.0, ci.1, scale, &font, &ct.as_str()); 
+        draw_text_mut(&mut image, blue, ai.0, ai.1, scale, &font, &at.as_str());
+        draw_text_mut(&mut image, blue, bi.0, bi.1, scale, &font, &bt.as_str());
+        draw_text_mut(&mut image, blue, ci.0, ci.1, scale, &font, &ct.as_str());
     }
 
     for (i, [aidx, bidx, cidx]) in triangles.iter().enumerate() {
         let a = vertices[*aidx];
         let b = vertices[*bidx];
         let c = vertices[*cidx];
-        let centroid = [(a[0] + b[0] + c[0]) / 3., (a[1] + b[1] + c[1]) / 3.]; 
+        let centroid = [(a[0] + b[0] + c[0]) / 3., (a[1] + b[1] + c[1]) / 3.];
         let cen = (
             lin_map(-X_VIEW_DIST_M, X_VIEW_DIST_M, 0., dim as f64, centroid[0]) as f32,
             lin_map(-Z_VIEW_DIST_M, Z_VIEW_DIST_M, 0., dim as f64, centroid[1]) as f32,
         );
         let ci = (cen.0.round() as i32, cen.1.round() as i32);
         let ct = format!("{}", i);
-        draw_text_mut(&mut image, red, ci.0, ci.1, scale, &font, &ct.as_str()); 
+        draw_text_mut(&mut image, red, ci.0, ci.1, scale, &font, &ct.as_str());
     }
 
     for (i, [aidx, bidx, cidx]) in triangles.iter().enumerate() {
         let a = vertices[*aidx];
         let b = vertices[*bidx];
         let c = vertices[*cidx];
-        let centroid = [(a[0] + b[0] + c[0]) / 3., (a[1] + b[1] + c[1]) / 3.]; 
+        let centroid = [(a[0] + b[0] + c[0]) / 3., (a[1] + b[1] + c[1]) / 3.];
         let cen = (
             lin_map(-X_VIEW_DIST_M, X_VIEW_DIST_M, 0., dim as f64, centroid[0]) as f32,
             lin_map(-Z_VIEW_DIST_M, Z_VIEW_DIST_M, 0., dim as f64, centroid[1]) as f32,

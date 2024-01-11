@@ -1,20 +1,22 @@
-use async_stream::__private::AsyncStream;
+//use async_stream::__private::AsyncStream;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::f64::consts::PI;
 
-use async_stream::stream;
+//use async_stream::stream;
+use bevy::ecs::reflect::ReflectComponent;
 use bevy::math::{DVec3, Vec4};
-use bevy::prelude::{Image, Mesh};
+use bevy::prelude::{Component, Image, Mesh, Reflect, Resource};
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_resource::TextureFormat::{R32Float, Rgba8Snorm};
 use bevy::render::render_resource::{Extent3d, TextureDimension};
 use delaunator::triangulate;
-use fixed::types::extra::{U12, U13};
-use fixed::FixedI32;
+// use fixed::types::extra::{U12, U13};
+// use fixed::FixedI32;
 use futures_util::{pin_mut, Stream, StreamExt};
 use image::{ImageBuffer, Rgb, RgbImage};
-use rand::{thread_rng, Rng};
-use tokio::net::TcpStream;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+// use rand::{thread_rng, Rng};
+// use tokio::net::TcpStream;
+// use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 use server::terrain_gen::{
     HeightMap, TerrainGenerator, TerrainNormals, TilePosition, MAX_HEIGHT, TILE_SIZE,
@@ -22,7 +24,7 @@ use server::terrain_gen::{
 use server::util::{cart_to_polar, lin_map};
 
 use crate::render::{CompleteVertices, SimpleVertex, VertexNormalUV};
-use crate::terrain_loader::get_height;
+//use crate::terrain_loader::get_height;
 
 pub const TILE_WORLD_SIZE: f32 = TILE_SIZE as f32;
 type TileOffset = TilePosition;
@@ -42,6 +44,11 @@ pub const PROB_TIGHTNESS: f64 = 100.0;
 
 pub const SCALE: f64 = 0.05;
 pub const TEXTURE_SCALE: f64 = 0.0001;
+
+
+#[derive(Component, Default, Reflect)]
+#[reflect(Component)]
+pub struct MainTerrain;
 
 /// Gets the height of the tile for a tile position
 /// `xr` and `yr` are in the range `[0, 1]`
@@ -79,19 +86,19 @@ pub fn vertex_color(vertex: [f32; 3]) -> [f32; 4] {
 /// which happens to have a nice formula (a * b * pi = A, where a/b are the major/minor axes)
 /// So we calculate the length of the axes and then we use the formula x^2/a^2 + y^2/b^2 = 1
 /// to get the specific height/width of the ellipse at a certain position along one of the axes
-pub fn create_lattice_plane() -> Vec<DVec3> {
+pub fn create_lattice_plane(approx_vertex_count: f64, x_view_distance: f64, z_view_distance: f64) -> Vec<DVec3> {
     let mut verts: Vec<DVec3> = vec![];
-    let x_bound = (X_VIEW_DIST_M * SCALE).asinh() / SCALE;
-    let z_bound = (Z_VIEW_DIST_M * SCALE).asinh() / SCALE;
+    let x_bound = (x_view_distance * SCALE).asinh() / SCALE;
+    let z_bound = (z_view_distance * SCALE).asinh() / SCALE;
     let aspect_ratio = x_bound / z_bound;
 
     let z_0_sqr: f64 = 3. / 4.;
     let z_0 = z_0_sqr.sqrt();
 
-    let x_verts = (z_0 * TERRAIN_VERTICES as f64 * aspect_ratio / PI)
+    let x_verts = (z_0 * approx_vertex_count * aspect_ratio / PI)
         .sqrt()
         .ceil() as i32;
-    let z_verts = (TERRAIN_VERTICES as f64 / (PI * x_verts as f64)).ceil() as i32;
+    let z_verts = (approx_vertex_count / (PI * x_verts as f64)).ceil() as i32;
 
     let total_verts = (PI * (x_verts * z_verts) as f64) as i32;
     println!(
@@ -137,14 +144,16 @@ pub fn create_lattice_plane() -> Vec<DVec3> {
 /// the inverse cdf is then sinh(p)
 /// This makes our math look quite simple
 /// The most complicated bit is changing to polar coordinates to do the transformation
-pub fn transform_lattice_positions(lattice: &mut Vec<DVec3>) {
+pub fn transform_lattice_positions(lattice: &mut Vec<DVec3>, rounding: Option<f64>) {
     for lattice_pos in lattice {
         let pol = cart_to_polar((lattice_pos.x, lattice_pos.z));
         lattice_pos.x = (pol.0 * SCALE).sinh() / SCALE * pol.1.cos();
         lattice_pos.z = (pol.0 * SCALE).sinh() / SCALE * pol.1.sin();
         // round the transformed pos to the nearest grid pos (quarter of a meter)
-        lattice_pos.x = (lattice_pos.x * 2.).round() / 2.;
-        lattice_pos.z = (lattice_pos.z * 2.).round() / 2.;
+        if let Some(rounding) = rounding {
+            lattice_pos.x = (lattice_pos.x / rounding).round() * rounding;
+            lattice_pos.z = (lattice_pos.z / rounding).round() * rounding;
+        }
     }
     // TODO: remove duplicates
 
@@ -158,40 +167,40 @@ pub fn transform_lattice_positions(lattice: &mut Vec<DVec3>) {
 /// There's a way to make it not lossy by storing the verts in a hash map, sorting the keys, and then unhashing them later, but it shouldn't matter much because
 /// the loss is sub-millimeter
 pub fn hilbert_order_verts(verts: &mut Vec<DVec3>) {
-    let mut hilbert_verts: Vec<hilbert::Point> =
-        vec![hilbert::Point::new(0, &mut [0, 0]); verts.len()];
-    const BOUND: f64 = (1 << (31 - 1)) as f64;
-    for idx in 0..verts.len() {
-        let vert = verts[idx];
-        let x_idx = lin_map(-X_VIEW_DIST_M, X_VIEW_DIST_M, 0.0, BOUND, vert.x)
-            .min(BOUND)
-            .max(0.)
-            .round() as u32;
-        let y_idx = lin_map(-Z_VIEW_DIST_M, Z_VIEW_DIST_M, 0.0, BOUND, vert.z)
-            .min(BOUND)
-            .max(0.)
-            .round() as u32;
-        hilbert_verts[idx] = hilbert::Point::new((x_idx ^ y_idx) as usize, &[x_idx, y_idx]);
-    }
-    hilbert::Point::hilbert_sort(&mut hilbert_verts, 32);
-    for idx in 0..hilbert_verts.len() {
-        let h_vert: &hilbert::Point = &hilbert_verts[idx];
-        let x: f64 = lin_map(
-            0.0,
-            BOUND,
-            -X_VIEW_DIST_M,
-            X_VIEW_DIST_M,
-            h_vert.get_coordinates()[0] as f64,
-        );
-        let z: f64 = lin_map(
-            0.0,
-            BOUND,
-            -Z_VIEW_DIST_M,
-            Z_VIEW_DIST_M,
-            h_vert.get_coordinates()[1] as f64,
-        );
-        verts[idx] = DVec3::new(x, 0., z);
-    }
+    // let mut hilbert_verts: Vec<hilbert::Point> =
+    //     vec![hilbert::Point::new(0, &mut [0, 0]); verts.len()];
+    // const BOUND: f64 = (1 << (31 - 1)) as f64;
+    // for idx in 0..verts.len() {
+    //     let vert = verts[idx];
+    //     let x_idx = lin_map(-X_VIEW_DIST_M, X_VIEW_DIST_M, 0.0, BOUND, vert.x)
+    //         .min(BOUND)
+    //         .max(0.)
+    //         .round() as u32;
+    //     let y_idx = lin_map(-Z_VIEW_DIST_M, Z_VIEW_DIST_M, 0.0, BOUND, vert.z)
+    //         .min(BOUND)
+    //         .max(0.)
+    //         .round() as u32;
+    //     hilbert_verts[idx] = hilbert::Point::new((x_idx ^ y_idx) as usize, &[x_idx, y_idx]);
+    // }
+    // hilbert::Point::hilbert_sort(&mut hilbert_verts, 32);
+    // for idx in 0..hilbert_verts.len() {
+    //     let h_vert: &hilbert::Point = &hilbert_verts[idx];
+    //     let x: f64 = lin_map(
+    //         0.0,
+    //         BOUND,
+    //         -X_VIEW_DIST_M,
+    //         X_VIEW_DIST_M,
+    //         h_vert.get_coordinates()[0] as f64,
+    //     );
+    //     let z: f64 = lin_map(
+    //         0.0,
+    //         BOUND,
+    //         -Z_VIEW_DIST_M,
+    //         Z_VIEW_DIST_M,
+    //         h_vert.get_coordinates()[1] as f64,
+    //     );
+    //     verts[idx] = DVec3::new(x, 0., z);
+    // }
 }
 
 pub fn compose_terrain_mesh(lattice: Vec<DVec3>, generator: &TerrainGenerator) -> Mesh {
@@ -229,21 +238,18 @@ pub fn compose_terrain_mesh(lattice: Vec<DVec3>, generator: &TerrainGenerator) -
     return tile_mesh;
 }
 
-// pub fn compose_terrain_mesh_from_server(lattice: Vec<DVec3>, socket: &mut WebSocketStream<MaybeTlsStream<TcpStream>>) -> {
-//
-// }
-
 /// Create a terrain mesh from the generator
 pub fn create_terrain_mesh(generator: &TerrainGenerator) -> Mesh {
-    let mut verts = create_lattice_plane();
-    transform_lattice_positions(&mut verts);
+    let mut verts = create_lattice_plane(TERRAIN_VERTICES as f64, X_VIEW_DIST_M, Z_VIEW_DIST_M);
+    transform_lattice_positions(&mut verts, Some(0.125));
     hilbert_order_verts(&mut verts);
     return compose_terrain_mesh(verts, &generator);
 }
 
+/// Create a terrain mesh but without baked heights
 pub fn create_base_terrain_mesh() -> Mesh {
-    let mut verts = create_lattice_plane();
-    transform_lattice_positions(&mut verts);
+    let mut verts = create_lattice_plane(TERRAIN_VERTICES as f64, X_VIEW_DIST_M, Z_VIEW_DIST_M);
+    transform_lattice_positions(&mut verts, None);
     hilbert_order_verts(&mut verts);
 
     let mut terrain_mesh = Mesh::new(PrimitiveTopology::TriangleList);
@@ -252,19 +258,10 @@ pub fn create_base_terrain_mesh() -> Mesh {
     let mut vertices: CompleteVertices = vec![];
     let mut delauney_verts: Vec<delaunator::Point> = vec![];
 
-    // TODO: Move normals to the server
-    let generator = TerrainGenerator::new();
-
     // we break the mesh down into component parts
     for vertex in verts {
         let mut new_vec = vertex.as_vec3().to_array();
-        // let height = get_height(vertex.x, vertex.z, (0, 0), socket).await;
-        // TODO: move normals to the server
-        let normal = generator
-            .get_normal(vertex.x, vertex.z)
-            .as_vec3()
-            .to_array();
-        new_vec[1] = 0.0 as f32;
+        let normal = [0.0, 1.0, 0.0];
         vertices.push((new_vec, normal, [vertex.x as f32, vertex.z as f32]));
         delauney_verts.push(delaunator::Point {
             x: vertex.x,
@@ -284,20 +281,6 @@ pub fn create_base_terrain_mesh() -> Mesh {
         .collect();
     terrain_mesh.set_indices(Some(Indices::U32(indices)));
     return terrain_mesh;
-}
-
-pub fn load_terrain_heights(
-    vertices: Vec<[f32; 3]>,
-    socket: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
-) -> impl Stream<Item = (usize, [f32; 3])> {
-    return stream! {
-        // for idx in 0..vertices.len() {
-        //     let vertex = vertices[idx];
-        //     let vertex_height = get_height(vertex.0[0] as f64, vertex.0[2] as f64, (0, 0), socket).await as f32;
-        //     yield (idx, ([vertex.0[0], vertex_height, vertex.0[2]], vertex.1, vertex.2))
-        // }
-        yield (0, [0., 0., 0.]);
-    };
 }
 
 pub fn create_terrain_height_map(generator: &TerrainGenerator) -> Image {
