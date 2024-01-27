@@ -246,11 +246,21 @@ pub fn create_terrain_mesh(generator: &TerrainGenerator) -> Mesh {
     return compose_terrain_mesh(verts, &generator);
 }
 
-/// Create a terrain mesh but without baked heights
-pub fn create_base_terrain_mesh() -> Mesh {
+pub fn create_base_lattice() -> Vec<DVec3> {
     let mut verts = create_lattice_plane(TERRAIN_VERTICES as f64, X_VIEW_DIST_M, Z_VIEW_DIST_M);
     transform_lattice_positions(&mut verts, None);
     hilbert_order_verts(&mut verts);
+    return verts;
+}
+
+/// Create a terrain mesh but without baked heights
+pub fn create_base_terrain_mesh(lattice: Option<Vec<DVec3>>) -> Mesh {
+    let mut verts: Vec<DVec3>;
+    if let Some(provided_verts) = lattice {
+        verts = provided_verts;
+    } else {
+        verts = create_base_lattice();
+    }
 
     let mut terrain_mesh = Mesh::new(PrimitiveTopology::TriangleList);
 

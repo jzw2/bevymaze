@@ -1,139 +1,176 @@
-use tokio::io::BufWriter;
-use tokio::net::TcpStream;
-use bytes::BytesMut;
+use bevy::log::Level;
+use bevy::prelude::{default, Bundle, Color, Component, Deref, DerefMut, Entity, Vec2};
+use bevy::utils::EntityHashSet;
+use clap::{Parser, ValueEnum};
+use derive_more::{Add, Mul};
+use lightyear::prelude::*;
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
-pub struct Connection {
-    stream: BufWriter<TcpStream>,
-    buffer: BytesMut,
+pub const PROTOCOL_ID: u64 = 0;
+
+pub const KEY: Key = [0; 32];
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum Transports {
+    Udp,
+    Webtransport,
 }
 
-impl Connection {
-    pub fn new(stream: TcpStream) -> Connection {
-        Connection {
-            stream: BufWriter::new(stream),
-            buffer: BytesMut::with_capacity(4096),
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+pub struct Direction {
+    pub(crate) up: bool,
+    pub(crate) down: bool,
+    pub(crate) left: bool,
+    pub(crate) right: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+pub enum Inputs {
+    Direction(Direction),
+    // NOTE: we NEED to provide a None input so that the server can distinguish between lost input packets and 'None' inputs
+    None,
+}
+impl UserAction for Inputs {}
+
+// Player
+#[derive(Bundle)]
+pub struct PlayerBundle {
+    id: PlayerId,
+    position: PlayerPosition,
+    color: PlayerColor,
+    replicate: Replicate,
+}
+
+impl PlayerBundle {
+    pub fn new(id: ClientId, position: Vec2, color: Color) -> Self {
+        Self {
+            id: PlayerId(id),
+            position: PlayerPosition(position),
+            color: PlayerColor(color),
+            replicate: Replicate {
+                // prediction_target: NetworkTarget::None,
+                prediction_target: NetworkTarget::Only(vec![id]),
+                interpolation_target: NetworkTarget::AllExcept(vec![id]),
+                ..default()
+            },
         }
     }
 }
 
-use tokio::io::{self, AsyncWriteExt};
-use mini_redis::Frame;
+// Components
 
-async fn write_frame(&mut self, frame: &Frame)
-    -> io::Result<()>
-{
-    match frame {
-        Frame::Simple(val) => {
-            self.stream.write_u8(b'+').await?;
-            self.stream.write_all(val.as_bytes()).await?;
-            self.stream.write_all(b"\r\n").await?;
-        }
-        Frame::Error(val) => {
-            self.stream.write_u8(b'-').await?;
-            self.stream.write_all(val.as_bytes()).await?;
-            self.stream.write_all(b"\r\n").await?;
-        }
-        Frame::Integer(val) => {
-            self.stream.write_u8(b':').await?;
-            self.write_decimal(*val).await?;
-        }
-        Frame::Null => {
-            self.stream.write_all(b"$-1\r\n").await?;
-        }
-        Frame::Bulk(val) => {
-            let len = val.len();
+#[derive(Component, Message, Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct PlayerId(ClientId);
 
-            self.stream.write_u8(b'$').await?;
-            self.write_decimal(len as u64).await?;
-            self.stream.write_all(val).await?;
-            self.stream.write_all(b"\r\n").await?;
-        }
-        Frame::Array(_val) => unimplemented!(),
+#[derive(
+    Component, Message, Serialize, Deserialize, Clone, Debug, PartialEq, Deref, DerefMut, Add, Mul,
+)]
+pub struct PlayerPosition(Vec2);
+
+#[derive(Component, Message, Deserialize, Serialize, Clone, Debug, PartialEq)]
+pub struct PlayerColor(pub(crate) Color);
+
+// Example of a component that contains an entity.
+// This component, when replicated, needs to have the inner entity mapped from the Server world
+// to the client World.
+// This can be done by adding a `#[message(custom_map)]` attribute to the component, and then
+// deriving the `MapEntities` trait for the component.
+#[derive(Component, Message, Deserialize, Serialize, Clone, Debug, PartialEq)]
+#[message(custom_map)]
+pub struct PlayerParent(Entity);
+
+impl<'a> MapEntities<'a> for PlayerParent {
+    fn map_entities(&mut self, entity_mapper: Box<dyn EntityMapper + 'a>) {
+        self.0.map_entities(entity_mapper);
     }
 
-    self.stream.flush().await;
-
-    Ok(())
-}
-
-use tokio::io::AsyncReadExt;
-use bytes::Buf;
-use mini_redis::Result;
-
-pub async fn read_frame(&mut self)
-    -> Result<Option<Frame>>
-{
-    loop {
-        // Attempt to parse a frame from the buffered data. If
-        // enough data has been buffered, the frame is
-        // returned.
-        if let Some(frame) = self.parse_frame()? {
-            return Ok(Some(frame));
-        }
-
-      // Read into the buffer, tracking the number
-        // of bytes read
-        let n = self.stream.read(
-            &mut self.buffer[self.cursor..]).await?;
-
-    // Ensure the buffer has capacity
-        if self.buffer.len() == self.cursor {
-            // Grow the buffer
-            self.buffer.resize(self.cursor * 2, 0);
-        }
-        if 0 == n {
-            if self.cursor == 0 {
-                return Ok(None);
-            } else {
-                return Err("connection reset by peer".into());
-            }
-        } else {
-            // Update our cursor
-            self.cursor += n;
-        }    }
-}
-
-impl Connection {
-    pub fn new(stream: TcpStream) -> Connection {
-        Connection {
-            stream,
-            // Allocate the buffer with 4kb of capacity.
-            buffer: BytesMut::with_capacity(4096),
-        }
-    }
-}use mini_redis::{Frame, Result};
-use mini_redis::frame::Error::Incomplete;
-use bytes::Buf;
-use std::io::Cursor;
-
-fn parse_frame(&mut self)
-    -> Result<Option<Frame>>
-{
-    // Create the `T: Buf` type.
-    let mut buf = Cursor::new(&self.buffer[..]);
-
-    // Check whether a full frame is available
-    match Frame::check(&mut buf) {
-        Ok(_) => {
-            // Get the byte length of the frame
-            let len = buf.position() as usize;
-
-            // Reset the internal cursor for the
-            // call to `parse`.
-            buf.set_position(0);
-
-            // Parse the frame
-            let frame = Frame::parse(&mut buf)?;
-
-            // Discard the frame from the buffer
-            self.buffer.advance(len);
-
-            // Return the frame to the caller.
-            Ok(Some(frame))
-        }
-        // Not enough data has been buffered
-        Err(Incomplete) => Ok(None),
-        // An error was encountered
-        Err(e) => Err(e.into()),
+    fn entities(&self) -> EntityHashSet<Entity> {
+        EntityHashSet::from_iter(vec![self.0])
     }
 }
+
+#[component_protocol(protocol = "MyProtocol")]
+pub enum Components {
+    #[sync(once)]
+    PlayerId(PlayerId),
+    #[sync(full)]
+    PlayerPosition(PlayerPosition),
+    #[sync(once)]
+    PlayerColor(PlayerColor),
+}
+
+// Channels
+
+#[derive(Channel)]
+pub struct Channel1;
+#[derive(Clone, Message, Serialize, Deserialize, Debug, PartialEq, Copy)]
+pub struct TerrainDataPoint {
+    /// Coordinates on the x-z plane
+    pub coordinates: [f32; 2],
+    /// Height of the terrain above the x-z plane
+    pub height: f32,
+    pub gradient: [f32; 2],
+    /// Index of the data in the data array, used for quick recall
+    pub idx: usize,
+}
+
+impl Default for TerrainDataPoint {
+    fn default() -> Self {
+        return TerrainDataPoint {
+            coordinates: [f32::INFINITY, f32::INFINITY],
+            height: f32::NAN,
+            gradient: [f32::NAN, f32::NAN],
+            idx: usize::MAX,
+        };
+    }
+}
+
+#[derive(Message, Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ReqTerrainHeights(pub Vec<TerrainDataPoint>);
+
+#[derive(Message, Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct TerrainHeights(pub Vec<TerrainDataPoint>);
+
+#[message_protocol(protocol = "MyProtocol")]
+pub enum Messages {
+    ReqTerrainHeights(ReqTerrainHeights),
+    TerrainHeights(TerrainHeights),
+}
+
+protocolize! {
+    Self = MyProtocol,
+    Message = Messages,
+    Component = Components,
+    Input = Inputs,
+}
+
+pub fn protocol() -> MyProtocol {
+    let mut protocol = MyProtocol::default();
+    protocol.add_channel::<Channel1>(ChannelSettings {
+        mode: ChannelMode::OrderedReliable(ReliableSettings::default()),
+        direction: ChannelDirection::Bidirectional,
+    });
+    protocol
+}
+
+pub fn shared_config() -> SharedConfig {
+    SharedConfig {
+        enable_replication: true,
+        client_send_interval: Duration::default(),
+        server_send_interval: Duration::from_millis(40),
+        // server_send_interval: Duration::from_millis(100),
+        tick: TickConfig {
+            tick_duration: Duration::from_secs_f64(1.0 / 64.0),
+        },
+        log: LogConfig {
+            level: Level::INFO,
+            filter: "wgpu=error,wgpu_hal=error,naga=warn,bevy_app=info,bevy_render=warn,quinn=warn"
+                .to_string(),
+        },
+    }
+}
+
+// Use a port of 0 to automatically select a port
+pub const CLIENT_PORT: u16 = 0;
+pub const SERVER_PORT: u16 = 7665;
