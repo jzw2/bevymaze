@@ -33,7 +33,7 @@ use crate::maze_gen::{
 };
 use crate::terrain_loader::{
     setup_terrain_loader, setup_transform_res, stream_terrain_mesh, update_transform_res,
-    MainTerrainColldier, MyClientPlugin, TerrainDataMap,
+    MainTerrainColldier, TerrainDataMap,
 };
 use crate::ui::*;
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
@@ -428,17 +428,7 @@ fn main() {
         .add_systems(Startup, setup_transform_res)
         .add_systems(Update, (update_transform_res, stream_terrain_mesh));
 
-    // let client_plugin = MyClientPlugin {
-    //     client_id: 124234,
-    //     client_port: CLIENT_PORT,
-    //     server_addr: Ipv4Addr::LOCALHOST,
-    //     server_port: SERVER_PORT,
-    //     transport: Transports::Udp,
-    // };
-    // app.add_plugins(client_plugin);
-
     app.add_systems(Startup, setup_fps_counter);
     app.add_systems(Update, (fps_text_update_system, fps_counter_showhide));
     app.run();
-    // print_render_graph(&mut app);
 }

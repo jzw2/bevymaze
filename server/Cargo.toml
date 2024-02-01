@@ -25,7 +25,6 @@ flate2 = "1.0.28"
 byteorder = "1.5.0"
 bevy_easings = "0.12.2"
 libnoise = "1.0.0"
-lightyear = { version = "0.6.1", features = ["webtransport"] }
 clap = { version = "4.4.16", features = ["derive"] }
 derive_more = "0.99.17"
 serde = "1.0.195"
