@@ -40,7 +40,7 @@ pub fn movement_input(
         dir += tf.forward();
     }
     dir.y = 0.0;
-    player_input.movement = dir.normalize_or_zero();
+    player_input.movement = dir.normalize_or_zero() * 4.;
 
     player_input.jumping = input.pressed(KeyCode::Space);
 }

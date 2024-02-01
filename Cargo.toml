@@ -57,3 +57,4 @@ crossbeam-channel = "0.5.11"
 tokio-tungstenite = "0.21.0"
 tokio = "1.35.1"
 postcard = { version = "1.0.8", features = ["use-std"] }
+bevy-tokio-tasks = { git = "https://github.com/foxzool/bevy-tokio-tasks.git", version = "0.12.0" }

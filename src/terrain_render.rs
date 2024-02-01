@@ -30,21 +30,20 @@ pub const TILE_WORLD_SIZE: f32 = TILE_SIZE as f32;
 type TileOffset = TilePosition;
 
 /// Number of chunks in each dir
-pub const X_VIEW_DISTANCE: i64 = 20;
+pub const X_VIEW_DISTANCE: i64 = 30;
 pub const Z_VIEW_DISTANCE: i64 = 300;
 /// Number of meters in each dir
 pub const X_VIEW_DIST_M: f64 = X_VIEW_DISTANCE as f64 * TILE_SIZE;
 pub const Z_VIEW_DIST_M: f64 = Z_VIEW_DISTANCE as f64 * TILE_SIZE;
 /// Number of vertices of our mesh
-pub const TERRAIN_VERTICES: i64 = 40000;
+pub const TERRAIN_VERTICES: i64 = 60000;
 
 pub const VIEW_DISTANCE: i64 = 150;
 
 pub const PROB_TIGHTNESS: f64 = 100.0;
 
-pub const SCALE: f64 = 0.05;
+pub const SCALE: f64 = 0.15;
 pub const TEXTURE_SCALE: f64 = 0.0001;
-
 
 #[derive(Component, Default, Reflect)]
 #[reflect(Component)]
@@ -80,13 +79,44 @@ pub fn vertex_color(vertex: [f32; 3]) -> [f32; 4] {
     return [0.2, 0.2, 0.2, 1.];
 }
 
+pub fn bary_poly_smooth_interp(
+    ai: usize,
+    bi: usize,
+    ci: usize,
+    height: &Vec<f32>,
+    gradients: &Vec<f32>,
+    bary: [f32; 2],
+) -> f32 {
+    let [x, y] = bary;
+
+    let p10: f32 = height[ai];
+    let p9 = gradients[ai * 2 + 1];
+    let p8 = gradients[ai * 2];
+    // let p7 = f32(0); // ignore, but here because it looks nicer
+    let p2 = -2.0 * height[ci] + p9 + 2.0 * p10 + gradients[ci * 2 + 1];
+    let p6 = height[ci] - p9 - p10 - p2;
+    let p1 = -2.0 * height[bi] + p8 + 2.0 * p10 + gradients[bi * 2];
+    let p5 = height[bi] - p8 - p10 - p1;
+    let p4 = gradients[ci * 2] - p8;
+    let p3 = gradients[bi * 2 + 1] - p9;
+
+    return p1 * x*x*x + p2 * y*y*y + p3 * x*x * y + p4 * x * y*y +
+            p5 * x*x + p6 * y*y + // p7 * x * y
+            p8 * x + p9 * y +
+            p10;
+}
+
 /// We create our lattice plane within an ellipse
 /// After it's transformed this just to happens to be a decent approximation for a rectangle
 /// Calculating the number of vertices in the ellipse is analogous to computing the area
 /// which happens to have a nice formula (a * b * pi = A, where a/b are the major/minor axes)
 /// So we calculate the length of the axes and then we use the formula x^2/a^2 + y^2/b^2 = 1
 /// to get the specific height/width of the ellipse at a certain position along one of the axes
-pub fn create_lattice_plane(approx_vertex_count: f64, x_view_distance: f64, z_view_distance: f64) -> Vec<DVec3> {
+pub fn create_lattice_plane(
+    approx_vertex_count: f64,
+    x_view_distance: f64,
+    z_view_distance: f64,
+) -> Vec<DVec3> {
     let mut verts: Vec<DVec3> = vec![];
     let x_bound = (x_view_distance * SCALE).asinh() / SCALE;
     let z_bound = (z_view_distance * SCALE).asinh() / SCALE;
@@ -247,7 +277,11 @@ pub fn create_terrain_mesh(generator: &TerrainGenerator) -> Mesh {
 }
 
 pub fn create_base_lattice() -> Vec<DVec3> {
-    let mut verts = create_lattice_plane(TERRAIN_VERTICES as f64, X_VIEW_DIST_M, Z_VIEW_DIST_M);
+    return create_base_lattice_with_verts(TERRAIN_VERTICES as f64);
+}
+
+pub fn create_base_lattice_with_verts(approx_vertex_count: f64) -> Vec<DVec3> {
+    let mut verts = create_lattice_plane(approx_vertex_count, X_VIEW_DIST_M, Z_VIEW_DIST_M);
     transform_lattice_positions(&mut verts, None);
     hilbert_order_verts(&mut verts);
     return verts;

@@ -28,39 +28,29 @@ use bevy::reflect::DynamicTypePath;
 // };
 // use bevy::render::settings::RenderCreation::Automatic;
 // use bevy::render::settings::WgpuSettings;
+use crate::maze_gen::{
+    populate_maze, SquareMaze, SquareMazeComponent, SQUARE_MAZE_CELL_SIZE, SQUARE_MAZE_WALL_WIDTH,
+};
+use crate::terrain_loader::{
+    setup_terrain_loader, setup_transform_res, stream_terrain_mesh, update_transform_res,
+    MainTerrainColldier, MyClientPlugin, TerrainDataMap,
+};
+use crate::ui::*;
+use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::render::texture::{ImageFilterMode, ImageSamplerDescriptor};
 use bevy_atmosphere::prelude::*;
 use bevy_framepace::{FramepacePlugin, FramepaceSettings, Limiter};
-// use bevy_mod_debugdump::print_render_graph;
-use bevy_mod_wanderlust::{
-    ControllerBundle, ControllerInput, ControllerPhysicsBundle, WanderlustPlugin,
-};
+use bevy_mod_wanderlust::{ControllerBundle, ControllerPhysicsBundle, WanderlustPlugin};
 use bevy_rapier3d::prelude::*;
-// use bevy_rapier3d::rapier::crossbeam::channel::unbounded;
 use bitvec::macros::internal::funty::Floating;
 use delaunator::{triangulate, Point};
-//use bevy_shader_utils::ShaderUtilsPlugin;
-use futures_util::{pin_mut, FutureExt, Stream, StreamExt};
-use rand::{thread_rng, Rng};
-// use tokio::net::unix::SocketAddr;
-// use tokio::net::{TcpListener, TcpStream};
-// use tokio::sync::mpsc::Sender;
-// use server::terrain_data::TerrainTile;
-use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
+use futures_util::{FutureExt, Stream, StreamExt};
+use rand::Rng;
 use server::connection::*;
 use server::terrain_gen::{TerrainGenerator, MAX_HEIGHT, TILE_SIZE};
 use server::util::{cart_to_polar, lin_map};
-// use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
-// use tokio_tungstenite::{connect_async, connect_async_with_config};
-// use url::Url;
-
-use crate::terrain_loader::{fill_in_fetched_data, request_terrain_vertices, update_terrain_vertices, MyClientPlugin, TerrainDataMap};
-use crate::ui::*;
-use bevy::diagnostic::DiagnosticsStore;
-use bevy::render::mesh::VertexAttributeValues::Float32x3;
-use bevy::time::common_conditions::on_timer;
-use lightyear::prelude::ClientId;
 use wasm_bindgen::prelude::wasm_bindgen;
+use crate::maze_render::GetWall;
 
 mod fabian;
 mod maze_gen;
@@ -203,11 +193,14 @@ fn create_terrain(
         }
     }
 
-    commands.spawn(Collider::heightfield(
-        heights,
-        dims,
-        dims,
-        Vec3::new(TILE_SIZE as f32 / 2., 1., TILE_SIZE as f32 / 2.),
+    commands.spawn((
+        Collider::heightfield(
+            heights,
+            dims,
+            dims,
+            Vec3::new(TILE_SIZE as f32 / 2., 1., TILE_SIZE as f32 / 2.),
+        ),
+        MainTerrainColldier,
     ));
 
     let normal_handle = textures.add(create_terrain_normal_map(&terrain_gen));
@@ -244,7 +237,7 @@ fn create_terrain(
     commands
         .spawn((
             ControllerBundle {
-                transform: Transform::from_xyz(0., 100., 0.),
+                transform: Transform::from_xyz(0., 2000., 0.),
                 physics: ControllerPhysicsBundle { ..default() },
                 ..default()
             },
@@ -294,6 +287,7 @@ fn create_terrain(
             commands.spawn((
                 MaterialMeshBundle {
                     mesh: meshes.add(terrain_mesh),
+                    transform: Transform::from_xyz(0.0, 0.0, 0.0),
                     material: materials.add(TerrainMaterial {
                         max_height: MAX_HEIGHT as f32,
                         grass_line: 0.15,
@@ -325,6 +319,45 @@ fn create_terrain(
     // commands.entity(controller).push_children(&[terrain]);
 }
 
+pub fn spawn_maze(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
+) {
+    let mut graph = SquareMaze {
+        maze: SquareMazeComponent::new(),
+        cell_size: SQUARE_MAZE_CELL_SIZE,
+        offset: (0, 0),
+        size: 32,
+        wall_width: SQUARE_MAZE_WALL_WIDTH,
+    };
+    let mut starting_comp = SquareMazeComponent::new();
+    starting_comp.add_node((-1, 0));
+    populate_maze(&mut graph, vec![starting_comp]);
+
+    graph.save();
+    let graph = SquareMaze::load(graph.offset);
+
+    // leaf texture
+    // let texture_handle = load_tiled_texture(&mut images, "hedge.png");
+    let texture_handle = asset_server.load("hedge.png");
+
+    for mesh in graph.get_wall_geometry(1.0, 2.0) {
+        commands.spawn(PbrBundle {
+            mesh: meshes.add(mesh),
+            material: materials.add(StandardMaterial {
+                // base_color: Color::rgba(0.01, 0.8, 0.2, 1.0).into(),
+                base_color_texture: Some(texture_handle.clone()),
+                alpha_mode: AlphaMode::Mask(0.5),
+                ..default()
+            }),
+            transform: Transform::from_xyz(0.0, 2.0, 0.0),
+            ..default()
+        });
+    }
+}
+
 #[wasm_bindgen]
 pub fn init_panic_hook() {
     console_error_panic_hook::set_once();
@@ -338,12 +371,11 @@ fn main() {
 
     let mut app = App::new();
 
-
-
     app
         // .insert_resource(ClearColor(Color::rgb(0., 0., 0.)))
         // the sky color
         // .insert_resource(ClearColor(Color::rgb(0.5294, 0.8078, 0.9216)))
+        .add_plugins(bevy_tokio_tasks::TokioTasksPlugin::default())
         .add_plugins(
             DefaultPlugins
                 .set(ImagePlugin {
@@ -387,30 +419,23 @@ fn main() {
         // .add_plugins(WireframePlugin)
         .add_systems(Startup, add_lighting)
         .add_systems(Startup, spawn_player)
-        // we do this last because the terrain rendering is attached to the player!
-        .add_systems(Startup, create_terrain)
-        // .add_systems(Startup, load_terrain)
-        // .add_systems(RunFixedUpdateLoop, pan_orbit_camera)
         .add_systems(Update, (movement_input, mouse_look, toggle_cursor_lock))
-        // .add_systems(Startup, (add_assets, spawn_tasks))
-        // .add_systems(Update, handle_tasks)
-        .add_systems(
-            Update,
-            (
-                update_terrain_vertices,
-                fill_in_fetched_data,
-                request_terrain_vertices,
-            ),
-        );
+        // .add_systems(RunFixedUpdateLoop, pan_orbit_camera)
+        // we do this last because the terrain rendering is attached to the player!
+        .add_systems(PreStartup, create_terrain)
+        .add_systems(Startup, spawn_maze)
+        .add_systems(PostStartup, setup_terrain_loader)
+        .add_systems(Startup, setup_transform_res)
+        .add_systems(Update, (update_transform_res, stream_terrain_mesh));
 
-    let client_plugin = MyClientPlugin {
-        client_id: 124234,
-        client_port: CLIENT_PORT,
-        server_addr: Ipv4Addr::LOCALHOST,
-        server_port: SERVER_PORT,
-        transport: Transports::Udp,
-    };
-    app.add_plugins(client_plugin);
+    // let client_plugin = MyClientPlugin {
+    //     client_id: 124234,
+    //     client_port: CLIENT_PORT,
+    //     server_addr: Ipv4Addr::LOCALHOST,
+    //     server_port: SERVER_PORT,
+    //     transport: Transports::Udp,
+    // };
+    // app.add_plugins(client_plugin);
 
     app.add_systems(Startup, setup_fps_counter);
     app.add_systems(Update, (fps_text_update_system, fps_counter_showhide));

@@ -56,20 +56,39 @@ pub fn barycentric(point: &[f64; 2], tri: &[[f64; 2]; 3]) -> (f64, f64) {
     let p0 = tri[0];
     let p1 = tri[1];
     let p2 = tri[2];
-    let area = 0.5
-        * (-p1[1] * p2[0]
-            + p0[1] * (-p1[0] + p2[0])
-            + p0[0] * (p1[1] - p2[1])
-            + p1[0] * p2[1]);
+    let area =
+        0.5 * (-p1[1] * p2[0] + p0[1] * (-p1[0] + p2[0]) + p0[0] * (p1[1] - p2[1]) + p1[0] * p2[1]);
     let s = 1. / (2. * area)
-        * (p0[1] * p2[0] - p0[0] * p2[1]
-            + (p2[1] - p0[1]) * point[0]
-            + (p0[0] - p2[0]) * point[1]);
+        * (p0[1] * p2[0] - p0[0] * p2[1] + (p2[1] - p0[1]) * point[0] + (p0[0] - p2[0]) * point[1]);
     let t = 1. / (2. * area)
-        * (p0[0] * p1[1] - p0[1] * p1[0]
-            + (p0[1] - p1[1]) * p0[0]
-            + (p1[0] - p0[0]) * point[1]);
+        * (p0[0] * p1[1] - p0[1] * p1[0] + (p0[1] - p1[1]) * p0[0] + (p1[0] - p0[0]) * point[1]);
     return (s, t);
+}
+
+fn dot(p1: &[f32; 2], p2: &[f32; 2]) -> f32 {
+    return p1[0] * p2[0] + p1[1] * p2[1];
+}
+
+fn sub(p1: &[f32; 2], p2: &[f32; 2]) -> [f32; 2] {
+    return [p1[0] - p2[0], p1[1] - p2[1]];
+}
+
+#[inline]
+pub fn barycentric32(point: &[f32; 2], tri: &[[f32; 2]; 3]) -> (f32, f32) {
+    let p = point;
+    let [a, b, c] = tri;
+    let v0 = &sub(b, a);
+    let v1 = &sub(c, a);
+    let v2 = &sub(p, a);
+    let d00 = dot(v0, v0);
+    let d01 = dot(v0, v1);
+    let d11 = dot(v1, v1);
+    let d20 = dot(v2, v0);
+    let d21 = dot(v2, v1);
+    let denom = d00 * d11 - d01 * d01;
+    let v = (d11 * d20 - d01 * d21) / denom;
+    let w = (d00 * d21 - d01 * d20) / denom;
+    return (v, w);
 }
 
 #[inline(always)]
@@ -80,7 +99,7 @@ pub fn barycentric(point: &[f64; 2], tri: &[[f64; 2]; 3]) -> (f64, f64) {
 ///    0 = collinear
 ///    1 = clockwise
 /// More on the topic: http://www.dcs.gla.ac.uk/~pat/52233/slides/Geometry1x1.pdf
-pub fn orientation(a: &[f64; 2], b: &[f64; 2], c: &[f64; 2]) -> f64 {
+pub fn orientation(a: &[f32; 2], b: &[f32; 2], c: &[f32; 2]) -> f32 {
     // Determinant of vectors of the line segments AB and BC:
     // [ cx - bx ][ bx - ax ]
     // [ cy - by ][ by - ay ]
@@ -92,8 +111,7 @@ pub fn orientation(a: &[f64; 2], b: &[f64; 2], c: &[f64; 2]) -> f64 {
 
 /// Copied and adapted from https://stackoverflow.com/a/2049593/3210986
 #[inline(always)]
-pub fn point_in_triangle (p: &[f64; 2], tri: &[[f64; 2]; 3]) -> bool
-{
+pub fn point_in_triangle(p: &[f32; 2], tri: &[[f32; 2]; 3]) -> bool {
     let [v1, v2, v3] = tri;
     let d1 = orientation(p, v1, v2);
     let d2 = orientation(p, v2, v3);
