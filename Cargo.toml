@@ -43,7 +43,7 @@ bevy_atmosphere = "0.8.1"
 caches = "0.2.7"
 libnoise = "1.0.0"
 bevy_mod_debugdump = "0.9.0"
-bitvec = "1.0.1"
+bitvec = { version = "1.0.1", features = ["serde"] }
 console_error_panic_hook = "0.1.7"
 wasm-bindgen = "0.2.89"
 web-sys = "0.3.66"

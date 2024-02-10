@@ -1,4 +1,6 @@
 use bevy::utils::{HashMap, HashSet};
+use bitvec::bitvec;
+use bitvec::vec::BitVec;
 use petgraph::graphmap::NodeTrait;
 use petgraph::prelude::{GraphMap, UnGraphMap};
 use petgraph::visit::{GetAdjacencyMatrix, IntoEdgeReferences, IntoEdges, IntoNeighbors};
@@ -42,6 +44,21 @@ pub struct SquareMaze {
     pub(crate) cell_size: f64,
     /// the width of the walls
     pub(crate) wall_width: f64,
+}
+
+pub struct CompressedSquareMaze {
+    /// The maze graph is assumed to have a node at every
+    /// integer tuple `[offset_x, offset_x + size) x [offset_y, offset_y + size)`.
+    /// This means we only store the edges. Furthermore, edges can only be between neighboring
+    /// cells, so each cell only stores the left and top neighbors as booleans.
+    /// For a cell `(x,y)` the left, top, right, and bottom edges exist based on the values of
+    /// `edges[2*(x + y*size)], edges[2*(x + y*size) + 1], edges[2*(x + 1 + y*size)], edges[2*(x + (y+1)*size) + 1]`
+    /// respectively
+    pub(crate) edges: BitVec,
+    /// the amount of cells on one side
+    pub(crate) size: i64,
+    /// the offset of nodes
+    pub(crate) offset: (i64, i64),
 }
 
 impl Maze<SquareNode> for SquareMaze {
@@ -297,15 +314,6 @@ impl Maze<CircleNode> for CircleMaze {
     }
 }
 
-/// Divide the "n"umerator from the "d"enominator and round up
-fn ceil_div(n: i64, d: i64) -> i64 {
-    if n % d == 0 {
-        return n / d;
-    } else {
-        return n / d + 1;
-    }
-}
-
 fn next_i64_tuple(file: &mut File, mut buf: [u8; 8]) -> (i64, i64) {
     file.read_exact(&mut buf);
     let p1 = i64::from_be_bytes(buf);
@@ -315,6 +323,27 @@ fn next_i64_tuple(file: &mut File, mut buf: [u8; 8]) -> (i64, i64) {
 }
 
 impl SquareMaze {
+    pub fn bit_rep(&self) -> CompressedSquareMaze {
+        let mut bits = bitvec![0; (self.size*self.size) as usize*2];
+        for x in 0..self.size {
+            for y in 0..self.size {
+                let node = (x + self.offset.0, y + self.offset.1);
+                let pos = 2 * (x + y * self.size) as usize;
+                if self.maze.contains_edge(node, (node.0 - 1, node.1)) {
+                    bits.set(pos, true);
+                }
+                if self.maze.contains_edge(node, (node.0, node.1 - 1)) {
+                    bits.set(pos + 1, true);
+                }
+            }
+        }
+        return CompressedSquareMaze {
+            edges: bits,
+            size: self.size,
+            offset: self.offset,
+        };
+    }
+
     pub fn save(&self) {
         self.save_named(SquareMaze::file_name(self.offset).as_str());
     }

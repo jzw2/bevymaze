@@ -20,11 +20,6 @@ use futures_lite::{future, StreamExt};
 use futures_util::SinkExt;
 use itertools::{enumerate, Itertools};
 use kiddo::{ImmutableKdTree, SquaredEuclidean};
-use lightyear::prelude::client::*;
-use lightyear::prelude::{
-    ClientId, Io, IoConfig, LinkConditionerConfig, LogConfig, Message, PingConfig, SharedConfig,
-    TickConfig, TransportConfig,
-};
 use postcard::{from_bytes, to_stdvec, to_vec};
 use rand::rngs::StdRng;
 use rand::{thread_rng, Rng, SeedableRng};

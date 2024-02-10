@@ -4,13 +4,16 @@
 use std::f32::consts::PI;
 use std::net::Ipv4Addr;
 use std::time::Duration;
+use bevy::core_pipeline::bloom::{BloomCompositeMode, BloomSettings};
 // use std::sync::{Arc, Mutex};
 
 use crate::player_controller::{
     mouse_look, movement_input, pan_orbit_camera, toggle_cursor_lock, PanOrbitCamera, PlayerBody,
     PlayerCam,
 };
-use crate::shaders::{TerrainMaterial, TerrainPlugin, MAX_TRIANGLES, MAX_VERTICES};
+use crate::shaders::{
+    ParticleSystem, TerrainMaterial, TerrainPlugin, HEIGHT, MAX_TRIANGLES, MAX_VERTICES, WIDTH,
+};
 // use crate::terrain_loader::get_chunk;
 use crate::terrain_render::{
     create_base_lattice, create_base_terrain_mesh, create_lattice_plane, create_terrain_height_map,
@@ -31,15 +34,18 @@ use bevy::reflect::DynamicTypePath;
 use crate::maze_gen::{
     populate_maze, SquareMaze, SquareMazeComponent, SQUARE_MAZE_CELL_SIZE, SQUARE_MAZE_WALL_WIDTH,
 };
+use crate::maze_render::GetWall;
 use crate::terrain_loader::{
     setup_terrain_loader, setup_transform_res, stream_terrain_mesh, update_transform_res,
     MainTerrainColldier, TerrainDataMap,
 };
 use crate::ui::*;
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
-use bevy::render::texture::{ImageFilterMode, ImageSamplerDescriptor};
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages};
+use bevy::render::texture::{ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy_atmosphere::prelude::*;
 use bevy_framepace::{FramepacePlugin, FramepaceSettings, Limiter};
+use bevy_mod_debugdump::render_graph::Settings;
 use bevy_mod_wanderlust::{ControllerBundle, ControllerPhysicsBundle, WanderlustPlugin};
 use bevy_rapier3d::prelude::*;
 use bitvec::macros::internal::funty::Floating;
@@ -50,7 +56,6 @@ use server::connection::*;
 use server::terrain_gen::{TerrainGenerator, MAX_HEIGHT, TILE_SIZE};
 use server::util::{cart_to_polar, lin_map};
 use wasm_bindgen::prelude::wasm_bindgen;
-use crate::maze_render::GetWall;
 
 mod fabian;
 mod maze_gen;
@@ -131,28 +136,29 @@ fn add_lighting(mut commands: Commands /*mut wireframe_config: ResMut<WireframeC
     // wireframe_config.global = true;
     let cascade_shadow_config = CascadeShadowConfigBuilder {
         first_cascade_far_bound: 0.3,
-        maximum_distance: 3.0,
+        // maximum_distance: 30000.,
         ..default()
     }
     .build();
     commands.spawn(DirectionalLightBundle {
         directional_light: DirectionalLight {
-            illuminance: 90000.0,
+            illuminance: 100000.0,
             shadows_enabled: true,
             ..default()
         },
         cascade_shadow_config,
-        transform: Transform::from_xyz(100., 100., 100.).looking_at(Vec3::ZERO, Vec3::Y),
+        transform: Transform::from_xyz(10., 100., 10.).looking_at(Vec3::ZERO, Vec3::Y),
         ..default()
     });
     commands.insert_resource(ClearColor(Color::rgb(0., 0.8, 1.0)));
     commands.insert_resource(AtmosphereModel::new(Nishita {
-        sun_intensity: 25.0,
+        sun_intensity: 28.0,
+        sun_position: Vec3::new(0.0, 1.0, 0.0),
         ..default()
     }));
     commands.insert_resource(AmbientLight {
         color: Color::WHITE,
-        brightness: 1.1,
+        brightness: 2.0,
     });
 }
 
@@ -257,7 +263,7 @@ fn create_terrain(
                             far: 400.0 * 1000.0,
                         }),
                         camera: Camera {
-                            // hdr: true,
+                            hdr: true,
                             ..default()
                         },
                         ..default()
@@ -272,6 +278,9 @@ fn create_terrain(
                             Color::rgb(0., 0.8, 1.0), // atmospheric extinction color (after light is lost due to absorption by atmospheric particles)
                             Color::rgba(0., 0.8, 1.0, 1.0), // atmospheric inscattering color (light gained due to scattering from the sun)
                         ),
+                    },
+                    BloomSettings {
+                        ..default()
                     },
                     PlayerCam,
                 ))
@@ -430,5 +439,78 @@ fn main() {
 
     app.add_systems(Startup, setup_fps_counter);
     app.add_systems(Update, (fps_text_update_system, fps_counter_showhide));
+
+    /*
+    Begin logic_compute_shader main.rs
+     */
+    app.add_systems(Startup, setup)
+        .add_systems(Update, spawn_on_space_bar);
+    /*
+    End logic_compute_shader main.rs
+     */
+
     app.run();
 }
+
+/*
+Begin logic_compute_shader main.rs
+ */
+fn create_texture(images: &mut Assets<Image>) -> Handle<Image> {
+    let mut image = Image::new_fill(
+        Extent3d {
+            width: WIDTH as u32,
+            height: HEIGHT as u32,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        &[0, 0, 0, 0],
+        TextureFormat::Rgba8Unorm,
+    );
+    image.texture_descriptor.usage =
+        TextureUsages::COPY_DST | TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING;
+    image.sampler = ImageSampler::nearest();
+    images.add(image)
+}
+
+fn spawn_on_space_bar(
+    mut commands: Commands,
+    mut images: ResMut<Assets<Image>>,
+    keyboard: Res<Input<KeyCode>>,
+) {
+    if keyboard.pressed(KeyCode::Space) {
+        let image = create_texture(&mut images);
+        commands
+            .spawn(SpriteBundle {
+                sprite: Sprite {
+                    custom_size: Some(Vec2::new(WIDTH * 3.0, HEIGHT * 3.0)),
+                    ..default()
+                },
+                texture: image.clone(),
+                ..default()
+            })
+            .insert(ParticleSystem {
+                rendered_texture: image,
+            });
+    }
+}
+
+fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
+    let image = create_texture(&mut images);
+    commands
+        .spawn(SpriteBundle {
+            sprite: Sprite {
+                custom_size: Some(Vec2::new(WIDTH * 3.0, HEIGHT * 3.0)),
+                ..default()
+            },
+            texture: image.clone(),
+            ..default()
+        })
+        .insert(ParticleSystem {
+            rendered_texture: image,
+        });
+
+    // commands.spawn(Camera2dBundle::default());
+}
+/*
+end main.rs
+ */
