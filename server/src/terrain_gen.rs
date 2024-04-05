@@ -6,7 +6,7 @@ use libnoise::prelude::*;
 ////// The amount of samples we take for the tile
 pub const TILE_RESOLUTION: usize = 256usize;
 ////// The size of the tile in meters
-pub const TILE_SIZE: f64 = 1000.;
+pub const TILE_SIZE: f64 = 1024.;
 
 /// Constants related to the amount of tiles that we're going to be rendering
 pub const VIEW_RADIUS: i64 = 100;

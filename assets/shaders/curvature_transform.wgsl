@@ -89,79 +89,79 @@ var<storage, read> gradients: array<f32>;
 @group(1) @binding(20)
 var<storage, read_write> triangle_indices: array<u32>;
 
-/// Next halfedge in a triangle.
-fn next_halfedge(i: u32) -> u32 {
-    if i % 3u == 2u {
-        return i - 2u;
-    } else {
-        return i + 1u;
-    }
-}
-
-/// Previous halfedge in a triangle.
-fn prev_halfedge(i: u32) -> u32 {
-    if i % 3u == 0u {
-        return i + 2u;
-    } else {
-        return i - 1u;
-    }
-}
-
-/// Copied and adapted from
-/// https://observablehq.com/@mootari/delaunay-findtriangle
-/// Returns the orientation of three points A, B and C:
-///   -1 = counterclockwise
-///    0 = collinear
-///    1 = clockwise
-/// More on the topic: http://www.dcs.gla.ac.uk/~pat/52233/slides/Geometry1x1.pdf
-fn orientation(a: vec2<f32>, b: vec2<f32>, c: vec2<f32>) -> f32 {
-    // Determinant of vectors of the line segments AB and BC:
-    // [ cx - bx ][ bx - ax ]
-    // [ cy - by ][ by - ay ]
-    return sign((c.x - b.x) * (b.y - a.y) - (c.y - b.y) * (b.x - a.x));
-}
-
-fn find_triangle(p: vec2<f32>, edge: u32) -> u32 {
-    if edge == max_u32 {
-        return edge;
-    }
-    // coords is required for delaunator compatibility.
-    var current = edge;
-    var start = current;
-    var n: u32 = 0u;
-
-    // we don't want to go more than 20 times
-    for (var i: i32 = 0; i < 100; i++) {
-        let next: u32 = next_halfedge(current);
-        let pc: u32 = 2u * triangles[current];
-        let pn: u32 = 2u * triangles[next];
-
-        let a = vec2<f32>(vertices[pc], vertices[pc + 1u]);
-        let b = vec2<f32>(vertices[pn], vertices[pn + 1u]);
-
-        let ori: f32 = orientation(a, b, p);
-
-        if ori >= 0. {
-            current = next;
-            if start == current {
-                break;
-            }
-        } else {
-            if halfedges[current] == max_u32 {
-                break;
-            }
-            current = halfedges[current];
-            n += 1u;
-            if n % 2u != 0u {
-                current = next_halfedge(current);
-            } else {
-                current = prev_halfedge(current);
-            }
-            start = current;
-        }
-    }
-    return current;
-}
+///// Next halfedge in a triangle.
+//fn next_halfedge(i: u32) -> u32 {
+//    if i % 3u == 2u {
+//        return i - 2u;
+//    } else {
+//        return i + 1u;
+//    }
+//}
+//
+///// Previous halfedge in a triangle.
+//fn prev_halfedge(i: u32) -> u32 {
+//    if i % 3u == 0u {
+//        return i + 2u;
+//    } else {
+//        return i - 1u;
+//    }
+//}
+//
+///// Copied and adapted from
+///// https://observablehq.com/@mootari/delaunay-findtriangle
+///// Returns the orientation of three points A, B and C:
+/////   -1 = counterclockwise
+/////    0 = collinear
+/////    1 = clockwise
+///// More on the topic: http://www.dcs.gla.ac.uk/~pat/52233/slides/Geometry1x1.pdf
+//fn orientation(a: vec2<f32>, b: vec2<f32>, c: vec2<f32>) -> f32 {
+//    // Determinant of vectors of the line segments AB and BC:
+//    // [ cx - bx ][ bx - ax ]
+//    // [ cy - by ][ by - ay ]
+//    return sign((c.x - b.x) * (b.y - a.y) - (c.y - b.y) * (b.x - a.x));
+//}
+//
+//fn find_triangle(p: vec2<f32>, edge: u32) -> u32 {
+//    if edge == max_u32 {
+//        return edge;
+//    }
+//    // coords is required for delaunator compatibility.
+//    var current = edge;
+//    var start = current;
+//    var n: u32 = 0u;
+//
+//    // we don't want to go more than 20 times
+//    for (var i: i32 = 0; i < 100; i++) {
+//        let next: u32 = next_halfedge(current);
+//        let pc: u32 = 2u * triangles[current];
+//        let pn: u32 = 2u * triangles[next];
+//
+//        let a = vec2<f32>(vertices[pc], vertices[pc + 1u]);
+//        let b = vec2<f32>(vertices[pn], vertices[pn + 1u]);
+//
+//        let ori: f32 = orientation(a, b, p);
+//
+//        if ori >= 0. {
+//            current = next;
+//            if start == current {
+//                break;
+//            }
+//        } else {
+//            if halfedges[current] == max_u32 {
+//                break;
+//            }
+//            current = halfedges[current];
+//            n += 1u;
+//            if n % 2u != 0u {
+//                current = next_halfedge(current);
+//            } else {
+//                current = prev_halfedge(current);
+//            }
+//            start = current;
+//        }
+//    }
+//    return current;
+//}
 
 // Copied and adapted from https://gamedev.stackexchange.com/a/23745
 // Compute barycentric coordinates (u, v, w) for
@@ -226,12 +226,13 @@ fn vertex(vertex_no_morph: Vertex) -> CuravtureMeshVertexOutput {
     out.uv = vertex.uv;
     out.world_position = bevy_pbr::mesh_functions::mesh_position_local_to_world(model, vec4<f32>(vertex.position, 1.0));
 
-    var previous = triangle_indices[vertex.vertex_index];
-    if previous == max_u32 {
-        previous = 0u;
-    }
-    let found = find_triangle(out.world_position.xz, previous);
-    triangle_indices[vertex.vertex_index] = found;
+//    var previous = triangle_indices[vertex.vertex_index];
+//    if previous == max_u32 {
+//        previous = 0u;
+//    }
+//    let found = find_triangle(out.world_position.xz, previous);
+//    triangle_indices[vertex.vertex_index] = found;
+    let found = triangle_indices[vertex.vertex_index];
     if found != max_u32 {
         let tri = 3u * (found / 3u);
         let ai = 2u * triangles[tri];

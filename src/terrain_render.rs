@@ -38,8 +38,6 @@ pub const Z_VIEW_DIST_M: f64 = Z_VIEW_DISTANCE as f64 * TILE_SIZE;
 /// Number of vertices of our mesh
 pub const TERRAIN_VERTICES: i64 = 60000;
 
-pub const VIEW_DISTANCE: i64 = 150;
-
 pub const PROB_TIGHTNESS: f64 = 100.0;
 
 pub const SCALE: f64 = 0.15;
@@ -176,9 +174,13 @@ pub fn create_lattice_plane(
 /// The most complicated bit is changing to polar coordinates to do the transformation
 pub fn transform_lattice_positions(lattice: &mut Vec<DVec3>, rounding: Option<f64>) {
     for lattice_pos in lattice {
-        let pol = cart_to_polar((lattice_pos.x, lattice_pos.z));
-        lattice_pos.x = (pol.0 * SCALE).sinh() / SCALE * pol.1.cos();
-        lattice_pos.z = (pol.0 * SCALE).sinh() / SCALE * pol.1.sin();
+        let mag = lattice_pos.length();
+        let scale_fac = ((mag * SCALE).sinh() / SCALE) / mag;
+        lattice_pos.x *= scale_fac;
+        lattice_pos.z *= scale_fac;
+        // let pol = cart_to_polar((lattice_pos.x, lattice_pos.z));
+        // lattice_pos.x = (pol.0 * SCALE).sinh() / SCALE * pol.1.cos();
+        // lattice_pos.z = (pol.0 * SCALE).sinh() / SCALE * pol.1.sin();
         // round the transformed pos to the nearest grid pos (quarter of a meter)
         if let Some(rounding) = rounding {
             lattice_pos.x = (lattice_pos.x / rounding).round() * rounding;
@@ -196,41 +198,53 @@ pub fn transform_lattice_positions(lattice: &mut Vec<DVec3>, rounding: Option<f6
 /// Unfortunately this is lossy due to the conversion between fixed point and floating point
 /// There's a way to make it not lossy by storing the verts in a hash map, sorting the keys, and then unhashing them later, but it shouldn't matter much because
 /// the loss is sub-millimeter
-pub fn hilbert_order_verts(verts: &mut Vec<DVec3>) {
-    // let mut hilbert_verts: Vec<hilbert::Point> =
-    //     vec![hilbert::Point::new(0, &mut [0, 0]); verts.len()];
-    // const BOUND: f64 = (1 << (31 - 1)) as f64;
-    // for idx in 0..verts.len() {
-    //     let vert = verts[idx];
-    //     let x_idx = lin_map(-X_VIEW_DIST_M, X_VIEW_DIST_M, 0.0, BOUND, vert.x)
-    //         .min(BOUND)
-    //         .max(0.)
-    //         .round() as u32;
-    //     let y_idx = lin_map(-Z_VIEW_DIST_M, Z_VIEW_DIST_M, 0.0, BOUND, vert.z)
-    //         .min(BOUND)
-    //         .max(0.)
-    //         .round() as u32;
-    //     hilbert_verts[idx] = hilbert::Point::new((x_idx ^ y_idx) as usize, &[x_idx, y_idx]);
-    // }
-    // hilbert::Point::hilbert_sort(&mut hilbert_verts, 32);
-    // for idx in 0..hilbert_verts.len() {
-    //     let h_vert: &hilbert::Point = &hilbert_verts[idx];
-    //     let x: f64 = lin_map(
-    //         0.0,
-    //         BOUND,
-    //         -X_VIEW_DIST_M,
-    //         X_VIEW_DIST_M,
-    //         h_vert.get_coordinates()[0] as f64,
-    //     );
-    //     let z: f64 = lin_map(
-    //         0.0,
-    //         BOUND,
-    //         -Z_VIEW_DIST_M,
-    //         Z_VIEW_DIST_M,
-    //         h_vert.get_coordinates()[1] as f64,
-    //     );
-    //     verts[idx] = DVec3::new(x, 0., z);
-    // }
+pub fn hilbert_order_verts(verts: &mut Vec<DVec3>, x_view_dist: f64, z_view_dist: f64) {
+    let mut hilbert_verts: Vec<hilbert::Point> =
+        vec![hilbert::Point::new(0, &mut [0, 0]); verts.len()];
+    const BOUND: f64 = (1 << (31 - 1)) as f64;
+    // TODO: figure out a way to calculate this for real, I just guestimated this from looking at a graph
+    const EXTRA: f64 = 2.8;
+    for idx in 0..verts.len() {
+        let vert = verts[idx];
+        let x_idx = lin_map(
+            -x_view_dist * EXTRA,
+            x_view_dist * EXTRA,
+            0.0,
+            BOUND,
+            vert.x,
+        )
+        .clamp(0., BOUND)
+        .round() as u32;
+        let y_idx = lin_map(
+            -z_view_dist * EXTRA,
+            z_view_dist * EXTRA,
+            0.0,
+            BOUND,
+            vert.z,
+        )
+        .clamp(0., BOUND)
+        .round() as u32;
+        hilbert_verts[idx] = hilbert::Point::new(idx, &[x_idx, y_idx]);
+    }
+    hilbert::Point::hilbert_sort(&mut hilbert_verts, 32);
+    for idx in 0..hilbert_verts.len() {
+        let h_vert: &hilbert::Point = &hilbert_verts[idx];
+        let x: f64 = lin_map(
+            0.0,
+            BOUND,
+            -x_view_dist * EXTRA,
+            x_view_dist * EXTRA,
+            h_vert.get_coordinates()[0] as f64,
+        );
+        let z: f64 = lin_map(
+            0.0,
+            BOUND,
+            -z_view_dist * EXTRA,
+            z_view_dist * EXTRA,
+            h_vert.get_coordinates()[1] as f64,
+        );
+        verts[idx] = DVec3::new(x, 0., z);
+    }
 }
 
 pub fn compose_terrain_mesh(lattice: Vec<DVec3>, generator: &TerrainGenerator) -> Mesh {
@@ -269,10 +283,10 @@ pub fn compose_terrain_mesh(lattice: Vec<DVec3>, generator: &TerrainGenerator) -
 }
 
 /// Create a terrain mesh from the generator
-pub fn create_terrain_mesh(generator: &TerrainGenerator) -> Mesh {
+pub fn create_terrain_mesh_from_generator(generator: &TerrainGenerator) -> Mesh {
     let mut verts = create_lattice_plane(TERRAIN_VERTICES as f64, X_VIEW_DIST_M, Z_VIEW_DIST_M);
     transform_lattice_positions(&mut verts, Some(0.125));
-    hilbert_order_verts(&mut verts);
+    hilbert_order_verts(&mut verts, X_VIEW_DIST_M, Z_VIEW_DIST_M);
     return compose_terrain_mesh(verts, &generator);
 }
 
@@ -281,14 +295,18 @@ pub fn create_base_lattice() -> Vec<DVec3> {
 }
 
 pub fn create_base_lattice_with_verts(approx_vertex_count: f64) -> Vec<DVec3> {
-    let mut verts = create_lattice_plane(approx_vertex_count, X_VIEW_DIST_M, Z_VIEW_DIST_M);
+    return create_lattice(approx_vertex_count, X_VIEW_DIST_M, Z_VIEW_DIST_M);
+}
+
+pub fn create_lattice(approx_vertex_count: f64, x_view_dist: f64, z_view_dist: f64) -> Vec<DVec3> {
+    let mut verts = create_lattice_plane(approx_vertex_count, x_view_dist, z_view_dist);
     transform_lattice_positions(&mut verts, None);
-    hilbert_order_verts(&mut verts);
+    hilbert_order_verts(&mut verts, x_view_dist, z_view_dist);
     return verts;
 }
 
 /// Create a terrain mesh but without baked heights
-pub fn create_base_terrain_mesh(lattice: Option<Vec<DVec3>>) -> Mesh {
+pub fn create_terrain_mesh(lattice: Option<Vec<DVec3>>) -> Mesh {
     let mut verts: Vec<DVec3>;
     if let Some(provided_verts) = lattice {
         verts = provided_verts;

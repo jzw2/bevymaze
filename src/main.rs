@@ -1,10 +1,12 @@
 //! Maze game
 
 // use std::collections::HashMap;
+use bevy::core_pipeline::bloom::{BloomCompositeMode, BloomSettings};
 use std::f32::consts::PI;
 use std::net::Ipv4Addr;
+use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
-use bevy::core_pipeline::bloom::{BloomCompositeMode, BloomSettings};
 // use std::sync::{Arc, Mutex};
 
 use crate::player_controller::{
@@ -12,18 +14,19 @@ use crate::player_controller::{
     PlayerCam,
 };
 use crate::shaders::{
-    ParticleSystem, TerrainMaterial, TerrainPlugin, HEIGHT, MAX_TRIANGLES, MAX_VERTICES, WIDTH,
+    MazeLayerMaterial, MazeLayerMaterialDataHolder, TerrainMaterial, TerrainMaterialDataHolder,
+    TerrainPlugin, MAX_TRIANGLES, MAX_VERTICES,
 };
 // use crate::terrain_loader::get_chunk;
 use crate::terrain_render::{
-    create_base_lattice, create_base_terrain_mesh, create_lattice_plane, create_terrain_height_map,
-    create_terrain_mesh, create_terrain_normal_map, MainTerrain, SCALE, TERRAIN_VERTICES,
-    TEXTURE_SCALE, X_VIEW_DISTANCE, X_VIEW_DIST_M, Z_VIEW_DISTANCE, Z_VIEW_DIST_M,
+    create_base_lattice, create_lattice_plane, create_terrain_height_map, create_terrain_mesh,
+    create_terrain_normal_map, MainTerrain, SCALE, TERRAIN_VERTICES, TEXTURE_SCALE,
+    X_VIEW_DISTANCE, X_VIEW_DIST_M, Z_VIEW_DISTANCE, Z_VIEW_DIST_M,
 };
 use bevy::log::LogPlugin;
 use bevy::math::{DVec2, Vec3};
 // use bevy::pbr::wireframe::{WireframeConfig, WireframePlugin};
-use bevy::pbr::{CascadeShadowConfigBuilder, NotShadowCaster};
+use bevy::pbr::{CascadeShadowConfigBuilder, ExtendedMaterial, NotShadowCaster};
 use bevy::prelude::*;
 use bevy::reflect::DynamicTypePath;
 // use bevy::render::render_resource::{
@@ -31,17 +34,23 @@ use bevy::reflect::DynamicTypePath;
 // };
 // use bevy::render::settings::RenderCreation::Automatic;
 // use bevy::render::settings::WgpuSettings;
-use crate::maze_gen::{
-    populate_maze, SquareMaze, SquareMazeComponent, SQUARE_MAZE_CELL_SIZE, SQUARE_MAZE_WALL_WIDTH,
+use crate::maze_loader::MazeCellDataState::Invalid;
+use crate::maze_loader::{
+    setup_maze_loader, stream_maze_mesh, MazeDataHolder, MAZE_CELLS_X, MAZE_CELLS_Y,
+    MAZE_DATA_COUNT,
 };
 use crate::maze_render::GetWall;
 use crate::terrain_loader::{
     setup_terrain_loader, setup_transform_res, stream_terrain_mesh, update_transform_res,
-    MainTerrainColldier, TerrainDataMap,
+    MainTerrainColldier, TerrainDataMap, TerrainTransformMaterialRes,
 };
 use crate::ui::*;
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages};
+use bevy::render::render_resource::{
+    Buffer, BufferUsages, BufferVec, Extent3d, OwnedBindingResource, PreparedBindGroup,
+    StorageBuffer, TextureDimension, TextureFormat, TextureUsages,
+};
+use bevy::render::renderer::{RenderDevice, RenderQueue};
 use bevy::render::texture::{ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy_atmosphere::prelude::*;
 use bevy_framepace::{FramepacePlugin, FramepaceSettings, Limiter};
@@ -58,12 +67,12 @@ use server::util::{cart_to_polar, lin_map};
 use wasm_bindgen::prelude::wasm_bindgen;
 
 mod fabian;
-mod maze_gen;
 mod maze_render;
 mod player_controller;
 mod render;
 mod shaders;
 // mod terrain_loader;
+mod maze_loader;
 mod terrain_loader;
 mod terrain_render;
 mod test_render;
@@ -169,13 +178,19 @@ fn create_terrain(
     // mut commands: Commands,
     // mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<TerrainMaterial>>,
+    mut maze_materials: ResMut<Assets<ExtendedMaterial<TerrainMaterial, MazeLayerMaterial>>>,
     mut textures: ResMut<Assets<Image>>,
     // player_controller: Query<Entity>,
+    mut render_device: ResMut<RenderDevice>,
+    mut render_queue: ResMut<RenderQueue>,
+    mut terrain_material_data_holder: ResMut<TerrainMaterialDataHolder>,
+    mut maze_data_holder: ResMut<MazeLayerMaterialDataHolder>,
 ) {
     let terrain_gen = TerrainGenerator::new();
     let lattice = create_base_lattice();
     commands.insert_resource(TerrainDataMap::new(&lattice));
-    let terrain_mesh = create_base_terrain_mesh(Some(lattice));
+    commands.insert_resource(MazeDataHolder::new());
+    let terrain_mesh = create_terrain_mesh(Some(lattice));
 
     let mut heights: Vec<f32> = vec![];
     let dims = 100 / 2;
@@ -212,9 +227,10 @@ fn create_terrain(
     let normal_handle = textures.add(create_terrain_normal_map(&terrain_gen));
 
     let mut delaunay_points: Vec<Point> = Vec::with_capacity(MAX_VERTICES);
-    let mut raw: Vec<f32> = Vec::with_capacity(MAX_VERTICES * 2);
-    let mut heights: Vec<f32> = Vec::with_capacity(MAX_VERTICES);
-    let mut gradients: Vec<f32> = Vec::with_capacity(MAX_VERTICES * 2);
+
+    // let raw = &mut terrain_material_data_holder.vertices;//with_capacity(MAX_VERTICES * 2);
+    // let heights = &mut terrain_material_data_holder.height;//with_capacity(MAX_VERTICES);
+    // let gradients = &mut terrain_material_data_holder.gradients;//with_capacity(MAX_VERTICES * 2);
 
     // generate some random terrain data
     for v in create_lattice_plane(
@@ -228,22 +244,107 @@ fn create_terrain(
         let z = (r * SCALE).sinh() / SCALE * theta.sin();
         let y = terrain_gen.get_height_for(x, z);
         delaunay_points.push(Point { x, y: z });
-        heights.push(y as f32);
-        raw.push(x as f32);
-        raw.push(z as f32);
+        terrain_material_data_holder.height.push(y as f32);
+        terrain_material_data_holder.vertices.push(x as f32);
+        terrain_material_data_holder.vertices.push(z as f32);
         let grad = terrain_gen.get_gradient(x, z);
-        gradients.push(grad.x as f32);
-        gradients.push(grad.y as f32);
+        terrain_material_data_holder.gradients.push(grad.x as f32);
+        terrain_material_data_holder.gradients.push(grad.y as f32);
     }
 
     let triangulation = triangulate(&delaunay_points);
     let vtx_count = terrain_mesh.count_vertices();
 
     let material = mats.add(Color::WHITE.into());
+
+    // let mut triangles = &terrain_material_data_holder.triangles;
+    // let mut halfedges = &terrain_material_data_holder.halfedges;
+
+    triangulation.triangles.iter().for_each(|e| {
+        terrain_material_data_holder.triangles.push(*e as u32);
+        return;
+    });
+    triangulation.halfedges.iter().for_each(|e| {
+        terrain_material_data_holder.halfedges.push(*e as u32);
+        return;
+    });
+
+    terrain_material_data_holder.write_buffer(&*render_device, &*render_queue);
+
+    // let mut triangle_indices = &terrain_material_data_holder.triangle_indices;
+    terrain_material_data_holder
+        .triangle_indices
+        .values_mut()
+        .append(&mut vec![0u32; vtx_count]);
+    terrain_material_data_holder
+        .triangle_indices
+        .write_buffer(&*render_device, &*render_queue);
+
+    terrain_material_data_holder
+        .mesh_vertices
+        .values_mut()
+        .append(&mut vec![0f32; terrain_mesh.count_vertices()]);
+    terrain_material_data_holder
+        .mesh_vertices
+        .write_buffer(&*render_device, &*render_queue);
+
+    let base_material = TerrainMaterial {
+        max_height: MAX_HEIGHT as f32,
+        grass_line: 0.15,
+        tree_line: 0.5,
+        snow_line: 0.75,
+        grass_color: Color::from([0.1, 0.4, 0.2, 1.]),
+        tree_color: Color::from([0.2, 0.5, 0.25, 1.]),
+        snow_color: Color::from([0.95, 0.95, 0.95, 1.]),
+        stone_color: Color::from([0.34, 0.34, 0.34, 1.]),
+        cosine_max_snow_slope: (45. * PI / 180.).cos(),
+        cosine_max_tree_slope: (40. * PI / 180.).cos(),
+        u_bound: ((X_VIEW_DIST_M * TEXTURE_SCALE).asinh() / TEXTURE_SCALE) as f32,
+        v_bound: ((Z_VIEW_DIST_M * TEXTURE_SCALE).asinh() / TEXTURE_SCALE) as f32,
+        normal_texture: normal_handle.into(),
+        scale: TEXTURE_SCALE as f32,
+        triangles: terrain_material_data_holder
+            .triangles
+            .buffer()
+            .unwrap()
+            .clone(),
+        halfedges: terrain_material_data_holder
+            .halfedges
+            .buffer()
+            .unwrap()
+            .clone(),
+        vertices: terrain_material_data_holder
+            .vertices
+            .buffer()
+            .unwrap()
+            .clone(),
+        height: terrain_material_data_holder
+            .height
+            .buffer()
+            .unwrap()
+            .clone(),
+        triangle_indices: terrain_material_data_holder
+            .triangle_indices
+            .buffer()
+            .unwrap()
+            .clone(),
+        gradients: terrain_material_data_holder
+            .gradients
+            .buffer()
+            .unwrap()
+            .clone(),
+        mesh_vertices: terrain_material_data_holder
+            .mesh_vertices
+            .buffer()
+            .unwrap()
+            .clone(),
+        transform: Vec2::ZERO,
+    };
+
     commands
         .spawn((
             ControllerBundle {
-                transform: Transform::from_xyz(0., 2000., 0.),
+                transform: Transform::from_xyz(0., 200., 0.),
                 physics: ControllerPhysicsBundle { ..default() },
                 ..default()
             },
@@ -279,9 +380,7 @@ fn create_terrain(
                             Color::rgba(0., 0.8, 1.0, 1.0), // atmospheric inscattering color (light gained due to scattering from the sun)
                         ),
                     },
-                    BloomSettings {
-                        ..default()
-                    },
+                    BloomSettings { ..default() },
                     PlayerCam,
                 ))
                 .with_children(|commands| {
@@ -295,34 +394,37 @@ fn create_terrain(
                 });
             commands.spawn((
                 MaterialMeshBundle {
-                    mesh: meshes.add(terrain_mesh),
+                    mesh: meshes.add(terrain_mesh.clone()),
                     transform: Transform::from_xyz(0.0, 0.0, 0.0),
-                    material: materials.add(TerrainMaterial {
-                        max_height: MAX_HEIGHT as f32,
-                        grass_line: 0.15,
-                        tree_line: 0.5,
-                        snow_line: 0.75,
-                        grass_color: Color::from([0.1, 0.4, 0.2, 1.]),
-                        tree_color: Color::from([0.2, 0.5, 0.25, 1.]),
-                        snow_color: Color::from([0.95, 0.95, 0.95, 1.]),
-                        stone_color: Color::from([0.34, 0.34, 0.34, 1.]),
-                        cosine_max_snow_slope: (45. * PI / 180.).cos(),
-                        cosine_max_tree_slope: (40. * PI / 180.).cos(),
-                        u_bound: ((X_VIEW_DIST_M * TEXTURE_SCALE).asinh() / TEXTURE_SCALE) as f32,
-                        v_bound: ((Z_VIEW_DIST_M * TEXTURE_SCALE).asinh() / TEXTURE_SCALE) as f32,
-                        normal_texture: normal_handle.into(),
-                        scale: TEXTURE_SCALE as f32,
-                        triangles: triangulation.triangles.iter().map(|e| *e as u32).collect(),
-                        halfedges: triangulation.halfedges.iter().map(|e| *e as u32).collect(),
-                        vertices: raw,
-                        height: heights,
-                        triangle_indices: vec![0u32; vtx_count],
-                        gradients,
-                    }),
+                    material: materials.add(base_material.clone()),
                     ..default()
                 },
                 MainTerrain,
             ));
+
+            maze_data_holder
+                .raw_maze_data
+                .write_buffer(&*render_device, &*render_queue);
+
+            const LAYER_COUNT: u32 = 20;
+            for layer in 0..LAYER_COUNT {
+                commands.spawn((
+                    MaterialMeshBundle {
+                        mesh: meshes.add(terrain_mesh.clone()),
+                        transform: Transform::from_xyz(0.0, 0.0, 0.0),
+                        material: maze_materials.add(ExtendedMaterial {
+                            base: base_material.clone(),
+                            extension: MazeLayerMaterial {
+                                layer_height: 2.5 * layer as f32 * 1.0 / (LAYER_COUNT as f32),
+                                data: maze_data_holder.raw_maze_data.buffer().unwrap().clone(),
+                                maze_top_left: Vec2::ZERO,
+                            },
+                        }),
+                        ..default()
+                    },
+                    MainTerrain,
+                ));
+            }
         });
 
     // commands.entity(controller).push_children(&[terrain]);
@@ -334,37 +436,6 @@ pub fn spawn_maze(
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
 ) {
-    let mut graph = SquareMaze {
-        maze: SquareMazeComponent::new(),
-        cell_size: SQUARE_MAZE_CELL_SIZE,
-        offset: (0, 0),
-        size: 32,
-        wall_width: SQUARE_MAZE_WALL_WIDTH,
-    };
-    let mut starting_comp = SquareMazeComponent::new();
-    starting_comp.add_node((-1, 0));
-    populate_maze(&mut graph, vec![starting_comp]);
-
-    graph.save();
-    let graph = SquareMaze::load(graph.offset);
-
-    // leaf texture
-    // let texture_handle = load_tiled_texture(&mut images, "hedge.png");
-    let texture_handle = asset_server.load("hedge.png");
-
-    for mesh in graph.get_wall_geometry(1.0, 2.0) {
-        commands.spawn(PbrBundle {
-            mesh: meshes.add(mesh),
-            material: materials.add(StandardMaterial {
-                // base_color: Color::rgba(0.01, 0.8, 0.2, 1.0).into(),
-                base_color_texture: Some(texture_handle.clone()),
-                alpha_mode: AlphaMode::Mask(0.5),
-                ..default()
-            }),
-            transform: Transform::from_xyz(0.0, 2.0, 0.0),
-            ..default()
-        });
-    }
 }
 
 #[wasm_bindgen]
@@ -386,24 +457,21 @@ fn main() {
         // .insert_resource(ClearColor(Color::rgb(0.5294, 0.8078, 0.9216)))
         .add_plugins(bevy_tokio_tasks::TokioTasksPlugin::default())
         .add_plugins(
-            DefaultPlugins
-                .set(ImagePlugin {
-                    default_sampler: ImageSamplerDescriptor {
-                        // address_mode_u: AddressMode::Repeat,
-                        // address_mode_v: AddressMode::Repeat,
-                        // address_mode_w: AddressMode::Repeat,
-                        mag_filter: ImageFilterMode::Linear,
-                        ..Default::default()
-                    },
-                })
-                .disable::<LogPlugin>(), // .set(RenderPlugin {
-                                         //     render_creation: Automatic(WgpuSettings {
-                                         //         features: WgpuFeatures::POLYGON_MODE_LINE,
-                                         //         ..default()
-                                         //     }),
-                                         // }),
+            DefaultPlugins.set(ImagePlugin {
+                default_sampler: ImageSamplerDescriptor {
+                    // address_mode_u: AddressMode::Repeat,
+                    // address_mode_v: AddressMode::Repeat,
+                    // address_mode_w: AddressMode::Repeat,
+                    mag_filter: ImageFilterMode::Linear,
+                    ..Default::default()
+                },
+            }), //.disable::<LogPlugin>(), // .set(RenderPlugin {
+                //     render_creation: Automatic(WgpuSettings {
+                //         features: WgpuFeatures::POLYGON_MODE_LINE,
+                //         ..default()
+                //     }),
+                // }),
         )
-        .add_plugins(MaterialPlugin::<TerrainMaterial> { ..default() })
         /*.add_plugins(
             ShaderUtilsPlugin,
         )*/
@@ -424,6 +492,20 @@ fn main() {
         .insert_resource(FramepaceSettings {
             limiter: Limiter::Manual(std::time::Duration::from_secs_f64(0.008)),
         })
+        .insert_resource(TerrainMaterialDataHolder {
+            triangles: BufferVec::new(BufferUsages::STORAGE),
+            halfedges: BufferVec::new(BufferUsages::STORAGE),
+            vertices: BufferVec::new(BufferUsages::STORAGE),
+            height: BufferVec::new(BufferUsages::STORAGE),
+            gradients: BufferVec::new(BufferUsages::STORAGE),
+            triangle_indices: BufferVec::new(BufferUsages::STORAGE),
+            mesh_vertices: BufferVec::new(BufferUsages::STORAGE),
+        })
+        .insert_resource(MazeLayerMaterialDataHolder {
+            raw_maze_data: StorageBuffer::from(Box::new(
+                [[[0u32; MAZE_DATA_COUNT]; MAZE_CELLS_Y]; MAZE_CELLS_X],
+            )),
+        })
         // .add_plugins(RapierDebugRenderPlugin::default())
         // .add_plugins(WireframePlugin)
         .add_systems(Startup, add_lighting)
@@ -432,85 +514,17 @@ fn main() {
         // .add_systems(RunFixedUpdateLoop, pan_orbit_camera)
         // we do this last because the terrain rendering is attached to the player!
         .add_systems(PreStartup, create_terrain)
-        .add_systems(Startup, spawn_maze)
+        // .add_systems(Startup, spawn_maze)
         .add_systems(PostStartup, setup_terrain_loader)
+        .add_systems(PostStartup, setup_maze_loader)
         .add_systems(Startup, setup_transform_res)
-        .add_systems(Update, (update_transform_res, stream_terrain_mesh));
+        .add_systems(
+            Update,
+            (update_transform_res, stream_terrain_mesh, stream_maze_mesh),
+        );
 
     app.add_systems(Startup, setup_fps_counter);
     app.add_systems(Update, (fps_text_update_system, fps_counter_showhide));
 
-    /*
-    Begin logic_compute_shader main.rs
-     */
-    app.add_systems(Startup, setup)
-        .add_systems(Update, spawn_on_space_bar);
-    /*
-    End logic_compute_shader main.rs
-     */
-
     app.run();
 }
-
-/*
-Begin logic_compute_shader main.rs
- */
-fn create_texture(images: &mut Assets<Image>) -> Handle<Image> {
-    let mut image = Image::new_fill(
-        Extent3d {
-            width: WIDTH as u32,
-            height: HEIGHT as u32,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        &[0, 0, 0, 0],
-        TextureFormat::Rgba8Unorm,
-    );
-    image.texture_descriptor.usage =
-        TextureUsages::COPY_DST | TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING;
-    image.sampler = ImageSampler::nearest();
-    images.add(image)
-}
-
-fn spawn_on_space_bar(
-    mut commands: Commands,
-    mut images: ResMut<Assets<Image>>,
-    keyboard: Res<Input<KeyCode>>,
-) {
-    if keyboard.pressed(KeyCode::Space) {
-        let image = create_texture(&mut images);
-        commands
-            .spawn(SpriteBundle {
-                sprite: Sprite {
-                    custom_size: Some(Vec2::new(WIDTH * 3.0, HEIGHT * 3.0)),
-                    ..default()
-                },
-                texture: image.clone(),
-                ..default()
-            })
-            .insert(ParticleSystem {
-                rendered_texture: image,
-            });
-    }
-}
-
-fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
-    let image = create_texture(&mut images);
-    commands
-        .spawn(SpriteBundle {
-            sprite: Sprite {
-                custom_size: Some(Vec2::new(WIDTH * 3.0, HEIGHT * 3.0)),
-                ..default()
-            },
-            texture: image.clone(),
-            ..default()
-        })
-        .insert(ParticleSystem {
-            rendered_texture: image,
-        });
-
-    // commands.spawn(Camera2dBundle::default());
-}
-/*
-end main.rs
- */

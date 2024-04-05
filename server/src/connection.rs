@@ -1,3 +1,4 @@
+use bitvec::vec::BitVec;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Copy)]
@@ -6,6 +7,12 @@ pub struct TerrainDataPointRequest {
     pub coordinates: [f32; 2],
     /// Index of the data in the data array, used for quick recall
     pub idx: usize,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+pub struct MazeCell {
+    pub cell: [i32; 2],
+    pub data: BitVec<u32>
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Copy)]
@@ -30,21 +37,24 @@ impl Default for TerrainDataPoint {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct ReqTerrainHeights(pub Vec<TerrainDataPointRequest>);
+// #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+// pub struct ReqTerrainHeights(pub Vec<TerrainDataPointRequest>);
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct TerrainHeights(pub Vec<TerrainDataPoint>);
+// #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+// pub struct TerrainHeights(pub Vec<TerrainDataPoint>);
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum MazeNetworkRequest {
-    ReqTerrainHeights(ReqTerrainHeights),
+    // TODO: switch to TerrainDataPointRequest
+    ReqTerrainHeights(Vec<TerrainDataPoint>),
+    ReqMaze(Vec<[i32; 2]>)
 }
 
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum MazeNetworkResponse {
-    TerrainHeights(TerrainHeights),
+    TerrainHeights(Vec<TerrainDataPoint>),
+    Maze(Vec<MazeCell>)
 }
 
 // Use a port of 0 to automatically select a port

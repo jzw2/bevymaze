@@ -97,6 +97,10 @@ fn fragment(
     var base_color = stone_color;
     let pos_vector = vec2<f32>(in.original_world_position[0] * 0.001, in.original_world_position[2] * 0.001);
     let height_frac = in.original_world_position[1] / max_height + 0.0; //0.08 * perlin_noise_2d(pos_vector);
+
+    pbr.material.perceptual_roughness = 0.98;
+    pbr.material.reflectance = 0.001;
+
     if (height_frac < grass_line) {
         base_color = grass_color;
     } else if (height_frac < tree_line) {
@@ -106,12 +110,13 @@ fn fragment(
             base_color = grass_color;
         }
     } else if (height_frac > snow_line && cosine_angle > cosine_max_snow_slope) {
+        pbr.material.reflectance = 0.95;
+        pbr.material.perceptual_roughness = 0.2;
         base_color = snow_color;
     }
 
     pbr.material.base_color = base_color;
-    pbr.material.perceptual_roughness = 0.98;
-    pbr.material.reflectance = 0.001;
+
     var output_color = pbr_functions::apply_pbr_lighting(pbr);
     output_color = pbr_functions::apply_fog(fog, output_color, in.world_position.xyz, view.world_position.xyz);
 

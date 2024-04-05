@@ -259,7 +259,7 @@ impl PregrackeHeirarchy {
         if node >= self.meta.len() {
             return usize::MAX;
         }
-        // make sure this is a valid child
+        // make sure this is a Valid child
         let us = self.meta[node];
         if us.1.is_nan() {
             return usize::MAX;

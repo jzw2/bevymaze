@@ -1,4 +1,4 @@
-use crate::maze_gen::{CircleMaze, CircleNode, SquareMaze, SquareNode};
+use server::maze_gen::{CircleMaze, CircleNode};
 use crate::render::{quad_cc_indices, quad_cw_indices, SimpleVertices};
 use bevy::math::{Vec2, Vec3};
 use bevy::prelude::{shape, Mesh};
@@ -6,6 +6,7 @@ use bevy::render::mesh::{Indices, PrimitiveTopology};
 use petgraph::graphmap::NodeTrait;
 use server::util::{cart_to_polar, dist, polar_angle, polar_to_cart};
 use std::f64::consts::PI;
+use server::square_maze_gen::{SquareMaze, SquareNode};
 
 /// A segment with endpoints p1 and p2
 pub struct Segment {
@@ -381,92 +382,92 @@ pub fn get_arc_mesh(arc: &Arc, width: f32, height: f32, divisions: u32) -> Mesh 
     return mesh;
 }
 
-impl CircleMaze {
-    fn get_node_cart_point(&self, n: CircleNode) -> (f64, f64) {
-        return polar_to_cart(self.get_node_pol_point(n));
-    }
-
-    fn get_node_pol_point(&self, n: CircleNode) -> (f64, f64) {
-        return (
-            n.0 as f64 * self.cell_size,
-            n.1 as f64 / (self.nodes_at_radius(n.0) as f64) * 2.0 * PI,
-        );
-    }
-}
-
-impl CircleMaze {
-    fn get_node_meshes(&self, node: CircleNode, width: f32, height: f32) -> Vec<Mesh> {
-        let mut meshes: Vec<Mesh> = vec![];
-
-        for touching in self.touching(node, 0.0) {
-            if touching.0 == node.0 && touching.1 > node.1 {
-                let mut clockwise_wall_node = touching;
-                if touching.1 < node.1 {
-                    // if the point's closest node is farther along the circle,
-                    // then we are using the clockwise wall
-                    // default is to use the counterclockwise wall
-                    clockwise_wall_node = node;
-                }
-                let node_pol_point = self.get_node_pol_point(clockwise_wall_node);
-                if !self
-                    .maze
-                    .contains_edge(self.correct_node(node), self.correct_node(touching))
-                {
-                    meshes.push(get_segment_mesh(
-                        &Segment {
-                            p1: polar_to_cart(node_pol_point),
-                            p2: polar_to_cart((
-                                node_pol_point.0 + self.cell_size,
-                                node_pol_point.1,
-                            )),
-                        },
-                        width,
-                        height,
-                    ));
-                }
-            } else if touching.0 > node.0 {
-                let (npp_radius, npp_theta) = self.get_node_pol_point(node);
-                let (_, npp_theta_plus_1) = self.get_node_pol_point((node.0, node.1 + 1));
-                let (tpp_radius, tpp_theta) = self.get_node_pol_point(touching);
-                let (_, tpp_theta_plus_1) = self.get_node_pol_point((touching.0, touching.1 + 1));
-
-                let mut thetas = vec![npp_theta, npp_theta_plus_1, tpp_theta, tpp_theta_plus_1];
-
-                //pro gamer avoid dividing my zero
-                thetas.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-
-                if !self
-                    .maze
-                    .contains_edge(self.correct_node(node), self.correct_node(touching))
-                {
-                    meshes.push(get_arc_mesh(
-                        &Arc {
-                            circle: Circle {
-                                center: (0.0, 0.0),
-                                radius: npp_radius.max(tpp_radius),
-                            },
-                            a1: thetas[1],
-                            a2: thetas[2],
-                        },
-                        width,
-                        height,
-                        3,
-                    ));
-                }
-            }
-        }
-        return meshes;
-    }
-}
+// impl CircleMaze {
+//     fn get_node_cart_point(&self, n: CircleNode) -> (f64, f64) {
+//         return polar_to_cart(self.get_node_pol_point(n));
+//     }
+// 
+//     fn get_node_pol_point(&self, n: CircleNode) -> (f64, f64) {
+//         return (
+//             n.0 as f64 * self.cell_size,
+//             n.1 as f64 / (self.nodes_at_radius(n.0) as f64) * 2.0 * PI,
+//         );
+//     }
+// }
+// 
+// impl CircleMaze {
+//     fn get_node_meshes(&self, node: CircleNode, width: f32, height: f32) -> Vec<Mesh> {
+//         let mut meshes: Vec<Mesh> = vec![];
+// 
+//         for touching in self.touching(node, 0.0) {
+//             if touching.0 == node.0 && touching.1 > node.1 {
+//                 let mut clockwise_wall_node = touching;
+//                 if touching.1 < node.1 {
+//                     // if the point's closest node is farther along the circle,
+//                     // then we are using the clockwise wall
+//                     // default is to use the counterclockwise wall
+//                     clockwise_wall_node = node;
+//                 }
+//                 let node_pol_point = self.get_node_pol_point(clockwise_wall_node);
+//                 if !self
+//                     .maze
+//                     .contains_edge(self.correct_node(node), self.correct_node(touching))
+//                 {
+//                     meshes.push(get_segment_mesh(
+//                         &Segment {
+//                             p1: polar_to_cart(node_pol_point),
+//                             p2: polar_to_cart((
+//                                 node_pol_point.0 + self.cell_size,
+//                                 node_pol_point.1,
+//                             )),
+//                         },
+//                         width,
+//                         height,
+//                     ));
+//                 }
+//             } else if touching.0 > node.0 {
+//                 let (npp_radius, npp_theta) = self.get_node_pol_point(node);
+//                 let (_, npp_theta_plus_1) = self.get_node_pol_point((node.0, node.1 + 1));
+//                 let (tpp_radius, tpp_theta) = self.get_node_pol_point(touching);
+//                 let (_, tpp_theta_plus_1) = self.get_node_pol_point((touching.0, touching.1 + 1));
+// 
+//                 let mut thetas = vec![npp_theta, npp_theta_plus_1, tpp_theta, tpp_theta_plus_1];
+// 
+//                 //pro gamer avoid dividing my zero
+//                 thetas.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+// 
+//                 if !self
+//                     .maze
+//                     .contains_edge(self.correct_node(node), self.correct_node(touching))
+//                 {
+//                     meshes.push(get_arc_mesh(
+//                         &Arc {
+//                             circle: Circle {
+//                                 center: (0.0, 0.0),
+//                                 radius: npp_radius.max(tpp_radius),
+//                             },
+//                             a1: thetas[1],
+//                             a2: thetas[2],
+//                         },
+//                         width,
+//                         height,
+//                         3,
+//                     ));
+//                 }
+//             }
+//         }
+//         return meshes;
+//     }
+// }
 
 impl GetWall<SquareNode> for SquareMaze {
     fn get_wall_geometry(&self, width: f32, height: f32) -> Vec<Mesh> {
         let mut meshes: Vec<Mesh> = vec![];
         for x in 0..self.size {
             for y in 0..self.size {
-                let cur = (x + self.offset.0, y + self.offset.1);
-                let corner = (x + self.offset.0 + 1, y + self.offset.1 + 1);
-                let adjacent = (x + self.offset.0 + 1, y + self.offset.1);
+                let cur = (x + self.offset().0, y + self.offset().1);
+                let corner = (x + self.offset().0 + 1, y + self.offset().1 + 1);
+                let adjacent = (x + self.offset().0 + 1, y + self.offset().1);
                 if !self.maze.contains_edge(cur, adjacent) {
                     meshes.push(get_segment_mesh(
                         &Segment {
@@ -477,7 +478,7 @@ impl GetWall<SquareNode> for SquareMaze {
                         height,
                     ));
                 }
-                let adjacent = (x + self.offset.0, y + self.offset.1 + 1);
+                let adjacent = (x + self.offset().0, y + self.offset().1 + 1);
                 if !self.maze.contains_edge(cur, adjacent) {
                     meshes.push(get_segment_mesh(
                         &Segment {
@@ -498,80 +499,80 @@ impl GetWall<SquareNode> for SquareMaze {
     }
 }
 
-impl GetWall<CircleNode> for CircleMaze {
-    fn get_wall_geometry(&self, width: f32, height: f32) -> Vec<Mesh> {
-        let mut meshes: Vec<Mesh> = vec![];
-        for r in 0..self.radius + 1 {
-            for n in 0..self.nodes_at_radius(r) {
-                meshes.append(&mut self.get_node_meshes((r, n as i64), width, height));
-            }
-        }
-        return meshes;
-    }
-
-    fn is_in_wall(&self, p: (f64, f64)) -> bool {
-        // get the closest sector to this point
-        let pp = cart_to_polar(p);
-        let r = (pp.0 / self.cell_size).floor() as u64;
-        if r > self.radius {
-            return false;
-        }
-        let node_count = self.nodes_at_radius(r);
-        let t = (pp.1 / (2.0 * PI / (node_count as f64))).floor() as i64;
-        let n = (r, t);
-
-        for touching in self.touching(n, 0.0) {
-            if touching.0 == n.0 {
-                let mut clockwise_wall_node = touching;
-                if touching.1 < n.1 {
-                    // if the point's closest node is farther along the circle,
-                    // then we are using the clockwise wall
-                    // default is to use the counterclockwise wall
-                    clockwise_wall_node = n;
-                }
-                let node_pol_point = self.get_node_pol_point(clockwise_wall_node);
-                if distance_to_segment(
-                    &Segment {
-                        p1: polar_to_cart(node_pol_point),
-                        p2: polar_to_cart((node_pol_point.0 + self.cell_size, node_pol_point.1)),
-                    },
-                    p,
-                ) <= self.wall_width
-                    && !self
-                        .maze
-                        .contains_edge(self.correct_node(n), self.correct_node(touching))
-                {
-                    return true;
-                }
-            } else {
-                let (npp_radius, npp_theta) = self.get_node_pol_point(n);
-                let (_, npp_theta_plus_1) = self.get_node_pol_point((n.0, n.1 + 1));
-                let (tpp_radius, tpp_theta) = self.get_node_pol_point(touching);
-                let (_, tpp_theta_plus_1) = self.get_node_pol_point((touching.0, touching.1 + 1));
-
-                let mut thetas = vec![npp_theta, npp_theta_plus_1, tpp_theta, tpp_theta_plus_1];
-
-                //pro gamer avoid dividing my zero
-                thetas.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-                let arc: Arc = Arc {
-                    circle: Circle {
-                        center: (0.0, 0.0),
-                        radius: npp_radius.max(tpp_radius),
-                    },
-                    a1: thetas[1],
-                    a2: thetas[2],
-                };
-
-                if distance_to_arc(&arc, p) <= self.wall_width
-                    && !self
-                        .maze
-                        .contains_edge(self.correct_node(n), self.correct_node(touching))
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-}
+// impl GetWall<CircleNode> for CircleMaze {
+//     fn get_wall_geometry(&self, width: f32, height: f32) -> Vec<Mesh> {
+//         let mut meshes: Vec<Mesh> = vec![];
+//         for r in 0..self.radius + 1 {
+//             for n in 0..self.nodes_at_radius(r) {
+//                 meshes.append(&mut self.get_node_meshes((r, n as i64), width, height));
+//             }
+//         }
+//         return meshes;
+//     }
+// 
+//     fn is_in_wall(&self, p: (f64, f64)) -> bool {
+//         // get the closest sector to this point
+//         let pp = cart_to_polar(p);
+//         let r = (pp.0 / self.cell_size).floor() as u64;
+//         if r > self.radius {
+//             return false;
+//         }
+//         let node_count = self.nodes_at_radius(r);
+//         let t = (pp.1 / (2.0 * PI / (node_count as f64))).floor() as i64;
+//         let n = (r, t);
+// 
+//         for touching in self.touching(n, 0.0) {
+//             if touching.0 == n.0 {
+//                 let mut clockwise_wall_node = touching;
+//                 if touching.1 < n.1 {
+//                     // if the point's closest node is farther along the circle,
+//                     // then we are using the clockwise wall
+//                     // default is to use the counterclockwise wall
+//                     clockwise_wall_node = n;
+//                 }
+//                 let node_pol_point = self.get_node_pol_point(clockwise_wall_node);
+//                 if distance_to_segment(
+//                     &Segment {
+//                         p1: polar_to_cart(node_pol_point),
+//                         p2: polar_to_cart((node_pol_point.0 + self.cell_size, node_pol_point.1)),
+//                     },
+//                     p,
+//                 ) <= self.wall_width
+//                     && !self
+//                         .maze
+//                         .contains_edge(self.correct_node(n), self.correct_node(touching))
+//                 {
+//                     return true;
+//                 }
+//             } else {
+//                 let (npp_radius, npp_theta) = self.get_node_pol_point(n);
+//                 let (_, npp_theta_plus_1) = self.get_node_pol_point((n.0, n.1 + 1));
+//                 let (tpp_radius, tpp_theta) = self.get_node_pol_point(touching);
+//                 let (_, tpp_theta_plus_1) = self.get_node_pol_point((touching.0, touching.1 + 1));
+// 
+//                 let mut thetas = vec![npp_theta, npp_theta_plus_1, tpp_theta, tpp_theta_plus_1];
+// 
+//                 //pro gamer avoid dividing my zero
+//                 thetas.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+//                 let arc: Arc = Arc {
+//                     circle: Circle {
+//                         center: (0.0, 0.0),
+//                         radius: npp_radius.max(tpp_radius),
+//                     },
+//                     a1: thetas[1],
+//                     a2: thetas[2],
+//                 };
+// 
+//                 if distance_to_arc(&arc, p) <= self.wall_width
+//                     && !self
+//                         .maze
+//                         .contains_edge(self.correct_node(n), self.correct_node(touching))
+//                 {
+//                     return true;
+//                 }
+//             }
+//         }
+// 
+//         return false;
+//     }
+// }

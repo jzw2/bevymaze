@@ -12,7 +12,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bevy = { version = "0.12.1" }
+bevy = { version = "0.12.1", features = ["trace"] }
 image = "0.24.6"
 imageproc = "0.23.0"
 petgraph = "0.6.3"
@@ -23,7 +23,7 @@ noise = "0.8.2"
 qoi = "0.4.1"
 lazy_static = "1.4.0"
 itertools = "0.11.0"
-bevy_shader_utils = "0.5.2"
+#bevy_shader_utils = "0.5.2"
 delaunator = "1.0.2"
 roots = "0.0.8"
 bevy_rapier3d = "0.23.0"
@@ -57,3 +57,4 @@ tokio-tungstenite = "0.21.0"
 tokio = "1.35.1"
 postcard = { version = "1.0.8", features = ["use-std"] }
 bevy-tokio-tasks = { git = "https://github.com/foxzool/bevy-tokio-tasks.git", version = "0.12.0" }
+hilbert = "0.1.2"

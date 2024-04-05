@@ -1,6 +1,6 @@
 use crate::fabian::find_triangle;
 use crate::player_controller::{PlayerBody, PlayerCam};
-use crate::shaders::{TerrainMaterial, MAX_VERTICES};
+use crate::shaders::{TerrainMaterial, TerrainMaterialDataHolder, MAX_VERTICES};
 use crate::terrain_render::*;
 use bevy::asset::AssetsMutIterator;
 use bevy::ecs::system::{CommandQueue, SystemState};
@@ -11,6 +11,7 @@ use bevy::reflect::erased_serde::__private::serde::{Deserialize, Serialize};
 use bevy::reflect::List;
 use bevy::render::mesh::VertexAttributeValues::Float32x3;
 use bevy::render::render_resource::encase::private::RuntimeSizedArray;
+use bevy::render::renderer::{RenderDevice, RenderQueue};
 use bevy::tasks::{block_on, AsyncComputeTaskPool, Task};
 use bevy_rapier3d::geometry::Collider;
 use bevy_tokio_tasks::TokioTasksRuntime;
@@ -18,7 +19,9 @@ use crossbeam_channel::{bounded, Receiver};
 use delaunator::{triangulate, Point, Triangulation};
 use futures_lite::{future, StreamExt};
 use futures_util::SinkExt;
+use hilbert::transform;
 use itertools::{enumerate, Itertools};
+use kiddo::float::kdtree::KdTree;
 use kiddo::{ImmutableKdTree, SquaredEuclidean};
 use postcard::{from_bytes, to_stdvec, to_vec};
 use rand::rngs::StdRng;
@@ -31,12 +34,12 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use kiddo::float::kdtree::KdTree;
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Error;
 use tokio_tungstenite::tungstenite::Message::Binary;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use url::Url;
+use server::connection::MazeNetworkResponse::TerrainHeights;
 
 /// Quarter meter data tolerance when the player is 1m away
 const DATA_TOLERANCE: f64 = 0.5;
@@ -48,7 +51,7 @@ pub struct MainTerrainColldier;
 pub struct TerrainDataUpdate {
     guesses: Vec<u32>,
     vertices: Vec<f32>,
-    triangules: Vec<u32>,
+    triangles: Vec<u32>,
     halfedges: Vec<u32>,
     heights: Vec<f32>,
     gradients: Vec<f32>,
@@ -60,7 +63,10 @@ pub struct TerrainDataUpdate {
 pub struct TerrainUpdateReceiver(Receiver<TerrainDataUpdate>);
 
 #[derive(Resource)]
-pub struct MeshOffsetRes(Arc<Mutex<GlobalTransform>>);
+pub struct MeshOffsetRes(pub Arc<Mutex<GlobalTransform>>);
+
+#[derive(Resource)]
+pub struct TerrainTransformMaterialRes(pub Handle<TerrainMaterial>);
 
 pub fn setup_transform_res(
     mut commands: Commands,
@@ -77,9 +83,20 @@ pub fn setup_transform_res(
 pub fn update_transform_res(
     transform_res: ResMut<MeshOffsetRes>,
     transform: Query<&GlobalTransform, (With<PlayerCam>, Without<PlayerBody>)>,
+    mut terrain_material: ResMut<Assets<TerrainMaterial>>,
 ) {
-    let mut val = transform_res.0.lock().unwrap();
-    *val = *transform.single();
+    let mut old = transform.single().translation();
+    // old.x = old.x.round();
+    // old.z = old.z.round();
+    let new_transform = GlobalTransform::from_xyz(old.x, 0., old.z);
+    {
+        let mut val = transform_res.0.lock().unwrap();
+        *val = new_transform;
+    }
+    // // also update the shader
+    if let Some((handle, material)) = terrain_material.iter_mut().next() {
+        material.transform = old.xz();
+    }
 }
 
 pub fn setup_terrain_loader(
@@ -87,7 +104,32 @@ pub fn setup_terrain_loader(
     runtime: ResMut<TokioTasksRuntime>,
     transform: Res<MeshOffsetRes>,
     terrain_data_map: Res<TerrainDataMap>,
+    mut terrain_material: ResMut<Assets<TerrainMaterial>>,
+    mut terrain_material_data_holder: ResMut<TerrainMaterialDataHolder>,
+    mut render_device: ResMut<RenderDevice>,
+    mut render_queue: ResMut<RenderQueue>,
 ) {
+    let (handle, material) = terrain_material.iter_mut().next().unwrap();
+    // setup the shader verts!
+
+    terrain_material_data_holder.mesh_vertices.clear();
+    terrain_material_data_holder
+        .mesh_vertices
+        .values_mut()
+        .append(
+            &mut terrain_data_map
+                .mesh
+                .terrain_mesh_verts
+                .clone()
+                .into_iter()
+                .flatten()
+                .collect(),
+        );
+
+    terrain_material_data_holder
+        .mesh_vertices
+        .write_buffer(&*render_device, &*render_queue);
+
     let (tx, rx) = bounded::<TerrainDataUpdate>(5);
     let transform = Arc::clone(&transform.0);
 
@@ -131,7 +173,10 @@ pub fn setup_terrain_loader(
                     // println!("Sending req for {}", to_fetch.len());
                     map.mark_requested(&mut to_fetch);
                     socket
-                        .send(Binary(to_stdvec(&to_fetch).unwrap()))
+                        .send(Binary(
+                            to_stdvec(&MazeNetworkRequest::ReqTerrainHeights(to_fetch.clone()))
+                                .unwrap(),
+                        ))
                         .await
                         .expect("TODO: panic message");
                     // now clear and restart
@@ -147,14 +192,16 @@ pub fn setup_terrain_loader(
                 match socket.next().await.unwrap() {
                     Ok(msg) => {
                         if let Binary(bin) = msg {
-                            let fetched = from_bytes::<Vec<TerrainDataPoint>>(&bin).unwrap();
-                            map.fill_in_data(&fetched);
-                            println!(
-                                "Filled in {}, remaining {}",
-                                fetched.len(),
-                                total - fetched.len()
-                            );
-                            total -= fetched.len();
+                            let fetched = from_bytes::<MazeNetworkResponse>(&bin).unwrap();
+                            if let TerrainHeights(fetched) = fetched {
+                                map.fill_in_data(&fetched);
+                                println!(
+                                    "Filled in {}, remaining {}",
+                                    fetched.len(),
+                                    total - fetched.len()
+                                );
+                                total -= fetched.len();
+                            }
                         }
                     }
                     Err(_) => {
@@ -232,7 +279,7 @@ pub fn setup_terrain_loader(
                     &triangulation,
                 ),
                 vertices: raw,
-                triangules: triangulation
+                triangles: triangulation
                     .triangles
                     .into_iter()
                     .map(|e| e as u32)
@@ -293,14 +340,7 @@ fn generate_terrain_collider(
                 triangulation.triangles[t + 2],
             );
             let (a, b) = barycentric32(&p, &[verts[A], verts[B], verts[C]]);
-            collider_heights.push(bary_poly_smooth_interp(
-                A,
-                B,
-                C,
-                heights,
-                gradients,
-                [a, b],
-            ));
+            collider_heights.push(bary_poly_smooth_interp(A, B, C, heights, gradients, [a, b]));
         }
     }
 
@@ -317,6 +357,9 @@ pub fn stream_terrain_mesh(
     terrain_collider: Query<Entity, With<MainTerrainColldier>>,
     receiver: Res<TerrainUpdateReceiver>,
     mut terrain_material: ResMut<Assets<TerrainMaterial>>,
+    mut terrain_material_data_holder: ResMut<TerrainMaterialDataHolder>,
+    mut render_device: ResMut<RenderDevice>,
+    mut render_queue: ResMut<RenderQueue>,
 ) {
     let last = receiver.try_iter().last();
     if let Some(update) = last {
@@ -332,13 +375,82 @@ pub fn stream_terrain_mesh(
             },
         ));
 
+        terrain_material_data_holder.vertices.clear();
+        terrain_material_data_holder
+            .vertices
+            .values_mut()
+            .append(&mut update.vertices.clone());
+        
+        terrain_material_data_holder.triangles.clear();
+        terrain_material_data_holder
+            .triangles
+            .values_mut()
+            .append(&mut update.triangles.clone());
+        
+        terrain_material_data_holder.halfedges.clear();
+        terrain_material_data_holder
+            .halfedges
+            .values_mut()
+            .append(&mut update.halfedges.clone());
+        
+        terrain_material_data_holder.height.clear();
+        terrain_material_data_holder
+            .height
+            .values_mut()
+            .append(&mut update.heights.clone());
+        
+        terrain_material_data_holder.gradients.clear();
+        terrain_material_data_holder
+            .gradients
+            .values_mut()
+            .append(&mut update.gradients.clone());
+        
+        terrain_material_data_holder.triangle_indices.clear();
+        terrain_material_data_holder
+            .triangle_indices
+            .values_mut()
+            .append(&mut update.guesses.clone());
+        
+        terrain_material_data_holder.write_buffer(&*render_device, &*render_queue);
+        
         let (handle, material) = terrain_material.iter_mut().next().unwrap();
-        material.vertices = update.vertices;
-        material.triangles = update.triangules;
-        material.halfedges = update.halfedges;
-        material.height = update.heights;
-        material.gradients = update.gradients;
-        material.triangle_indices = update.guesses;
+        material.triangles = terrain_material_data_holder
+            .triangles
+            .buffer()
+            .unwrap()
+            .clone();
+        material.halfedges = terrain_material_data_holder
+            .halfedges
+            .buffer()
+            .unwrap()
+            .clone();
+        material.vertices = terrain_material_data_holder
+            .vertices
+            .buffer()
+            .unwrap()
+            .clone();
+        material.height = terrain_material_data_holder
+            .height
+            .buffer()
+            .unwrap()
+            .clone();
+        material.triangle_indices = terrain_material_data_holder
+            .triangle_indices
+            .buffer()
+            .unwrap()
+            .clone();
+        material.gradients = terrain_material_data_holder
+            .gradients
+            .buffer()
+            .unwrap()
+            .clone();
+        material.mesh_vertices = terrain_material_data_holder
+            .mesh_vertices
+            .buffer()
+            .unwrap()
+            .clone();
+
+        // material.triangle_indices = update.guesses;
     }
 }
 
@@ -361,7 +473,7 @@ pub struct TerrainMeshHolder {
     /// An unordered list of vertices in the mesh
     terrain_mesh_verts: Vec<[f32; 2]>,
     /// The reverse locator lets us find which point in the terrain MESH we are closest to quickly
-    reverse_locator: KdTree<f32, u64, 2, 32, u32>,
+    reverse_locator: KdTree<f32, u64, 2, 128, u32>,
     /// Center of the terrain mesh
     center: Vec2,
     /// The radius of acceptance for each vertex in terrain_mesh_verts
@@ -441,7 +553,7 @@ impl TerrainDataMap {
             resolved_data: holder.clone(),
             unresolved_data: holder,
             mesh: TerrainMeshHolder {
-                reverse_locator: KdTree::<f32, u64, 2, 32, u32>::from(&lattice_data),
+                reverse_locator: KdTree::<f32, u64, 2, 128, u32>::from(&lattice_data),
                 terrain_mesh_verts: lattice_data,
                 center: Vec2::ZERO,
                 check_radii,

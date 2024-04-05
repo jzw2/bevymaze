@@ -52,7 +52,7 @@ pub fn mouse_look(
     // sensitivity: Res<Sensitivity>,
     mut input: EventReader<MouseMotion>,
 ) {
-    let mut terrain_tf = terrain.single_mut();
+    // let mut terrain_tf = terrain.iter_mut().next().unwrap();
     let mut cam_tf = cam.single_mut();
     let mut body_tf = body.single_mut();
 
@@ -83,7 +83,9 @@ pub fn mouse_look(
         rot * Vec3::Y * cumulative.x / 180.0 * sens,
     ));
 
-    terrain_tf.rotation = body_tf.rotation.inverse();
+    for mut terrain_tf in terrain.iter_mut() {
+        terrain_tf.rotation = body_tf.rotation.inverse();
+    }
 }
 
 pub fn toggle_cursor_lock(
