@@ -406,7 +406,7 @@ fn create_terrain(
                 .raw_maze_data
                 .write_buffer(&*render_device, &*render_queue);
 
-            const LAYER_COUNT: u32 = 20;
+            const LAYER_COUNT: u32 = 0;
             for layer in 0..LAYER_COUNT {
                 commands.spawn((
                     MaterialMeshBundle {

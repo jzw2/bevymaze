@@ -71,7 +71,7 @@ pub fn setup_maze_loader(
                 for j in 0..MAZE_CELLS_Y {
                     match holder.data_states[i][j] {
                         Invalid => {
-                            to_fetch.push([i as i32 + left, j as i32 + top]);
+                            //to_fetch.push([i as i32 + left, j as i32 + top]);
                             holder.data_states[i][j] = Loading;
                         }
                         _ => {}

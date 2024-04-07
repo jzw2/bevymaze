@@ -18,6 +18,15 @@ pub type SquareNode = (i64, i64);
 pub type SquareMazeComponent = MazeComponent<SquareNode>;
 
 impl SquareMaze {
+    pub fn is_outside_maze(&self, node: SquareNode, fuzz: i64) -> bool {
+        let (x, y) = self.offset();
+        let (i, j) = node;
+        return i < x - fuzz
+            || j < y - fuzz
+            || i >= x + self.size + fuzz
+            || j > y + self.size + fuzz;
+    }
+
     pub fn new(cell: (i64, i64)) -> Self {
         return SquareMaze {
             maze: Default::default(),
@@ -58,6 +67,12 @@ impl SquareMaze {
     }
 
     fn save_named(&self, fname: &str) {
+        let mut to_save: SquareMaze = self.clone();
+        for node in self.maze.nodes() {
+            if self.is_outside_maze(node, 1) {
+                to_save.maze.remove_node(node);
+            }
+        }
         let file_res = OpenOptions::new()
             .create(true)
             .write(true)
@@ -65,7 +80,7 @@ impl SquareMaze {
             // .append(true) // Open in append mode
             .open(fname);
 
-        let obj = to_stdvec::<SquareMaze>(&self).expect("Could not serialize maze");
+        let obj = to_stdvec::<SquareMaze>(&to_save).expect("Could not serialize maze");
         let mut file = file_res.expect("Could not open file");
         file.write(&obj).expect("Could not write maze");
         file.flush().expect("Could not flush maze file");
@@ -112,7 +127,7 @@ pub struct CompressedSquareMaze {
 }
 
 /// Represent a square grid maze
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SquareMaze {
     pub maze: SquareMazeComponent,
     /// the amount of cells on one side
@@ -134,29 +149,38 @@ impl Maze<SquareNode> for SquareMaze {
     }
 
     fn adjacent(&self, center: SquareNode) -> Vec<SquareNode> {
-        let mut nodes: Vec<SquareNode> = vec![];
-        // current bounds of maze component
-        let (x_o, y_o) = self.offset();
-        let size_off: SquareNode = (x_o + self.size, y_o + self.size);
-        for i in [-1, 1] {
-            let n_x = center.0 + i;
-            if x_o - 1 <= n_x && n_x <= size_off.0 {
-                if y_o <= center.1 && center.1 < size_off.1 {
-                    nodes.push((n_x, center.1));
-                }
-            };
-        }
+        let (x, y) = center;
+        let mut nodes: Vec<SquareNode> = vec![(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)];
+        return nodes
+            .iter()
+            .filter_map(|n| match self.is_outside_maze(*n, 0) {
+                true => None,
+                false => Some(*n)
+            })
+            .collect();
 
-        for i in [-1, 1] {
-            let n_y = center.1 + i;
-            if x_o <= center.1 && center.1 < size_off.0 {
-                if y_o - 1 <= n_y && n_y <= size_off.1 {
-                    nodes.push((center.0, n_y));
-                }
-            };
-        }
+        // // current bounds of maze component
+        // let (x_o, y_o) = self.offset();
+        // let size_off: SquareNode = (x_o + self.size, y_o + self.size);
+        // for i in [-1, 1] {
+        //     let n_x = center.0 + i;
+        //     if x_o - 1 <= n_x && n_x <= size_off.0 {
+        //         if y_o <= center.1 && center.1 < size_off.1 {
+        //             nodes.push((n_x, center.1));
+        //         }
+        //     };
+        // }
 
-        return nodes;
+        // for i in [-1, 1] {
+        //     let n_y = center.1 + i;
+        //     if x_o <= center.1 && center.1 < size_off.0 {
+        //         if y_o - 1 <= n_y && n_y <= size_off.1 {
+        //             nodes.push((center.0, n_y));
+        //         }
+        //     };
+        // }
+
+        // return nodes;
     }
 }
 

@@ -331,6 +331,8 @@ impl<N: NodeTrait, E: Clone> GetRandomNode<N, E> for UnGraphMap<N, E> {
     }
 
     // TODO: see about removing weight because it's kinda dumb
+    // Adds all VALID possible edges to `self` that eminate from `component`.
+    // A valid edge is an edge that does not connect any fully-connected components to themselves
     fn add_possible_edges_of_component<M: Maze<N>>(
         &mut self,
         maze: &M,
