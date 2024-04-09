@@ -71,7 +71,7 @@ pub fn setup_maze_loader(
                 for j in 0..MAZE_CELLS_Y {
                     match holder.data_states[i][j] {
                         Invalid => {
-                            //to_fetch.push([i as i32 + left, j as i32 + top]);
+                            to_fetch.push([i as i32 + left, j as i32 + top]);
                             holder.data_states[i][j] = Loading;
                         }
                         _ => {}
@@ -148,9 +148,9 @@ pub fn stream_maze_mesh(
             .raw_maze_data
             .write_buffer(&*render_device, &*render_queue);
 
-        let (handle, material) = maze_material.iter_mut().next().unwrap();
-
-        material.extension.maze_top_left = update.maze_top_left;
+        if let Some((handle, material)) = maze_material.iter_mut().next() {
+            material.extension.maze_top_left = update.maze_top_left;
+        }
     }
 }
 

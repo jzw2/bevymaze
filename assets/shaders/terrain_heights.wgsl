@@ -130,38 +130,30 @@ fn find_triangle(p: vec2<f32>, edge: u32) -> u32 {
 }
 
 
-@compute @workgroup_size(600, 1, 1)
+@compute @workgroup_size(64)
 fn init(@builtin(global_invocation_id) invocation_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
-    for (var i: u32 = 0u; i < 100u; i++) {
-        let vertex_idx = invocation_id.x * 100u + i;
-        let vertex = vec2<f32>(mesh_vertices[vertex_idx*2u] + transform.x, mesh_vertices[vertex_idx*2u + 1u] + transform.y);
+    // for (var i: u32 = 0u; i < 100u; i++) {
+    //     let vertex_idx = invocation_id.x * 100u + i;
+    //     let vertex = vec2<f32>(mesh_vertices[vertex_idx*2u] + transform.x, mesh_vertices[vertex_idx*2u + 1u] + transform.y);
 
-        var previous = 0u;
-        if invocation_id.x > 0u {
-            previous = triangle_indices[vertex_idx - 1u];
-        }
-        if previous == max_u32 {
-            previous = 0u;
-        }
-        let found = find_triangle(vertex, previous);
-        triangle_indices[vertex_idx] = found;
-    }
+    //     var previous = 0u;
+    //     if invocation_id.x > 0u {
+    //         previous = triangle_indices[vertex_idx - 1u];
+    //     }
+    //     if previous == max_u32 {
+    //         previous = 0u;
+    //     }
+    //     let found = find_triangle(vertex, previous);
+    //     triangle_indices[vertex_idx] = found;
+    // }
 }
 
 
-@compute @workgroup_size(1024)
+@compute @workgroup_size(64)
 fn update(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
-    let vert_count = arrayLength(&mesh_vertices) / 2u;
-    let average_batch_size = u32(ceil(f32(vert_count) / 1024.0f));
-    var batch_size = average_batch_size;
-    let leftover_batch_size = vert_count % 1024u;
-    if invocation_id.x == 1023u && leftover_batch_size > 0u {
-        batch_size = leftover_batch_size;
-    }
-
-    let batch = invocation_id.x * average_batch_size;
-    for (var i: u32 = 0u; i < batch_size; i++) {
-        let vertex_idx = batch + i;
+    let vert_count = arrayLength(&triangle_indices);
+    if invocation_id.x < vert_count {
+        let vertex_idx = invocation_id.x;
         let vertex = vec2<f32>(
             mesh_vertices[vertex_idx * 2u     ] + transform.x,
             mesh_vertices[vertex_idx * 2u + 1u] + transform.y
@@ -171,7 +163,31 @@ fn update(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 //        if previous == max_u32 {
 //            previous = 0u;
 //        }
-        let found = find_triangle(vertex, previous);
-        triangle_indices[vertex_idx] = found;
+        // let found = find_triangle(vertex, previous);
+        // triangle_indices[vertex_idx] = found;
     }
+
+//     let vert_count = arrayLength(&mesh_vertices) / 2u;
+//     let average_batch_size = u32(ceil(f32(vert_count) / 1024.0f));
+//     var batch_size = average_batch_size;
+//     let leftover_batch_size = vert_count % 1024u;
+//     if invocation_id.x == 1023u && leftover_batch_size > 0u {
+//         batch_size = leftover_batch_size;
+//     }
+
+//     let batch = invocation_id.x * average_batch_size;
+//     for (var i: u32 = 0u; i < batch_size; i++) {
+//         let vertex_idx = batch + i;
+//         let vertex = vec2<f32>(
+//             mesh_vertices[vertex_idx * 2u     ] + transform.x,
+//             mesh_vertices[vertex_idx * 2u + 1u] + transform.y
+//         );
+
+//         var previous = triangle_indices[vertex_idx];
+// //        if previous == max_u32 {
+// //            previous = 0u;
+// //        }
+//         let found = find_triangle(vertex, previous);
+//         triangle_indices[vertex_idx] = found;
+//     }
 }

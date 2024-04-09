@@ -1,8 +1,12 @@
+use crate::maze_loader::MazeData;
 use crate::terrain_render::TERRAIN_VERTICES;
 use bevy::asset::{load_internal_asset, Asset};
 use bevy::core_pipeline::core_3d;
 use bevy::core_pipeline::core_3d::graph::node::START_MAIN_PASS;
-use bevy::pbr::{ExtendedMaterial, ExtractedMaterials, MaterialExtension, MaterialPipeline, MaterialPipelineKey, PrepassPipeline, RenderMaterials};
+use bevy::pbr::{
+    ExtendedMaterial, ExtractedMaterials, MaterialExtension, MaterialPipeline, MaterialPipelineKey,
+    PrepassPipeline, RenderMaterials,
+};
 use bevy::prelude::*;
 use bevy::reflect::TypeUuid;
 use bevy::render::extract_component::{ExtractComponent, ExtractComponentPlugin};
@@ -11,7 +15,15 @@ use bevy::render::extract_resource::ExtractResourcePlugin;
 use bevy::render::mesh::MeshVertexBufferLayout;
 use bevy::render::render_asset::RenderAssets;
 use bevy::render::render_graph::{RenderGraph, RenderGraphApp, ViewNodeRunner};
-use bevy::render::render_resource::{encase, AsBindGroup, AsBindGroupError, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingResource, BindingType, Buffer, BufferBindingType, BufferInitDescriptor, BufferUsages, BufferVec, CachedComputePipelineId, CachedPipelineState, ComputePassDescriptor, ComputePipelineDescriptor, OwnedBindingResource, PipelineCache, PipelineCacheError, PreparedBindGroup, RenderPipelineDescriptor, ShaderRef, ShaderStages, ShaderType, SpecializedMeshPipelineError, StorageTextureAccess, TextureFormat, TextureViewDimension, UnpreparedBindGroup, StorageBuffer};
+use bevy::render::render_resource::{
+    encase, AsBindGroup, AsBindGroupError, BindGroup, BindGroupDescriptor, BindGroupEntry,
+    BindGroupLayout, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingResource, BindingType,
+    Buffer, BufferBindingType, BufferInitDescriptor, BufferUsages, BufferVec,
+    CachedComputePipelineId, CachedPipelineState, ComputePassDescriptor, ComputePipelineDescriptor,
+    OwnedBindingResource, PipelineCache, PipelineCacheError, PreparedBindGroup,
+    RenderPipelineDescriptor, ShaderRef, ShaderStages, ShaderType, SpecializedMeshPipelineError,
+    StorageBuffer, StorageTextureAccess, TextureFormat, TextureViewDimension, UnpreparedBindGroup,
+};
 use bevy::render::renderer::{RenderContext, RenderDevice, RenderQueue};
 use bevy::render::texture::{FallbackImage, GpuImage};
 use bevy::render::{render_graph, Render, RenderApp, RenderSet};
@@ -21,7 +33,6 @@ use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::rc::Rc;
 use std::sync::Arc;
-use crate::maze_loader::MazeData;
 // use bevy::render::RenderApp;
 // use bevy::render::renderer::{RenderAdapter, RenderDevice};
 
@@ -31,7 +42,7 @@ pub const CURVATURE_MESH_VERTEX_OUTPUT: Handle<Shader> = Handle::weak_from_u128(
 
 pub const UTIL: Handle<Shader> = Handle::weak_from_u128(128742342344982);
 
-pub const MAX_VERTICES: usize = 200000;
+pub const MAX_VERTICES: usize = 100000;
 pub const MAX_TRIANGLES: usize = 2 * MAX_VERTICES - 5;
 
 #[derive(Resource)]
@@ -46,7 +57,6 @@ pub struct TerrainMaterialDataHolder {
     pub(crate) height: BufferVec<f32>,
     /// len is 2 * MAX_VERTICES
     pub(crate) gradients: BufferVec<f32>,
-    // We manually add this later, since it's a storage texture and those aren't supported yet
     /// len is TERRAIN_VERTICES
     pub(crate) triangle_indices: BufferVec<u32>,
 
@@ -159,7 +169,7 @@ impl Material for TerrainMaterial {
 
 #[derive(Resource)]
 pub struct MazeLayerMaterialDataHolder {
-    pub(crate) raw_maze_data: StorageBuffer<MazeData>
+    pub(crate) raw_maze_data: StorageBuffer<MazeData>,
 }
 
 #[derive(Asset, TypePath, TypeUuid, AsBindGroup, Debug, Clone)]
@@ -170,7 +180,7 @@ pub struct MazeLayerMaterial {
 
     #[storage(24, read_only, buffer, visibility(vertex, fragment, compute))]
     pub(crate) data: Buffer,
-    
+
     #[uniform(25)]
     pub(crate) maze_top_left: Vec2,
 }
@@ -198,8 +208,10 @@ impl Plugin for TerrainPlugin {
         load_internal_asset!(app, UTIL, "../assets/shaders/util.wgsl", Shader::from_wgsl);
 
         app.add_plugins(MaterialPlugin::<TerrainMaterial> { ..default() });
-        app.add_plugins(MaterialPlugin::<ExtendedMaterial<TerrainMaterial, MazeLayerMaterial>> { ..default() });
-        
+        app.add_plugins(
+            MaterialPlugin::<ExtendedMaterial<TerrainMaterial, MazeLayerMaterial>> { ..default() },
+        );
+
         let render_app = app.sub_app_mut(RenderApp);
 
         let mut render_graph = render_app.world.resource_mut::<RenderGraph>();
@@ -213,8 +225,6 @@ impl Plugin for TerrainPlugin {
                 core_3d::graph::NAME,
                 &[UPDATE_TERRAIN_VERTEX_HEIGHTS_NODE_NAME, START_MAIN_PASS],
             );
-
-        
     }
 
     fn finish(&self, app: &mut App) {
@@ -333,38 +343,45 @@ impl render_graph::Node for UpdateTerrainVertexHeightsNode {
         render_context: &mut RenderContext,
         world: &World,
     ) -> Result<(), render_graph::NodeRunError> {
-        let render_terrain_material = world.resource::<RenderMaterials<TerrainMaterial>>();
-        let (id, prepared_material) = render_terrain_material.0.iter().next().unwrap();
+        if let Some(terrain_data) = world.get_resource::<TerrainMaterialDataHolder>() {
+            let render_terrain_material = world.resource::<RenderMaterials<TerrainMaterial>>();
+            let (id, prepared_material) = render_terrain_material.0.iter().next().unwrap();
 
-        let pipeline_cache = world.resource::<PipelineCache>();
-        let pipeline = world.resource::<UpdateTerrainHeightsPipeline>();
+            let pipeline_cache = world.resource::<PipelineCache>();
+            let pipeline = world.resource::<UpdateTerrainHeightsPipeline>();
 
-        let mut pass = render_context
-            .command_encoder()
-            .begin_compute_pass(&ComputePassDescriptor::default());
+            let mut pass = render_context
+                .command_encoder()
+                .begin_compute_pass(&ComputePassDescriptor::default());
 
-        pass.set_bind_group(0, &prepared_material.bind_group, &[]);
+            pass.set_bind_group(0, &prepared_material.bind_group, &[]);
 
-        // select the pipeline based on the current state
-        match self.state {
-            UpdateTerrainVertexHeightsState::Loading => {
-                // println!("load");
-            }
-            UpdateTerrainVertexHeightsState::Init => {
-                // println!("init");
-                let init_pipeline = pipeline_cache
-                    .get_compute_pipeline(pipeline.init_pipeline)
-                    .unwrap();
-                pass.set_pipeline(init_pipeline);
-                pass.dispatch_workgroups(600, 1, 1);
-            }
-            UpdateTerrainVertexHeightsState::Update => {
-                // println!("Update");
-                let update_pipeline = pipeline_cache
-                    .get_compute_pipeline(pipeline.update_pipeline)
-                    .unwrap();
-                pass.set_pipeline(update_pipeline);
-                pass.dispatch_workgroups(8, 1, 1);
+            // select the pipeline based on the current state
+            match self.state {
+                UpdateTerrainVertexHeightsState::Loading => {
+                    // println!("load");
+                }
+                UpdateTerrainVertexHeightsState::Init => {
+                    // println!("init");
+                    let init_pipeline = pipeline_cache
+                        .get_compute_pipeline(pipeline.init_pipeline)
+                        .unwrap();
+                    pass.set_pipeline(init_pipeline);
+                    pass.dispatch_workgroups(600, 1, 1);
+                }
+                UpdateTerrainVertexHeightsState::Update => {
+                    // println!("Update");
+                    let update_pipeline = pipeline_cache
+                        .get_compute_pipeline(pipeline.update_pipeline)
+                        .unwrap();
+                    pass.set_pipeline(update_pipeline);
+                    println!("WG's {}", terrain_data.triangle_indices.len().div_ceil(64) as u32);
+                    pass.dispatch_workgroups(
+                        terrain_data.triangle_indices.len().div_ceil(64) as u32,
+                        1,
+                        1,
+                    );
+                }
             }
         }
 

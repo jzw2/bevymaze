@@ -36,7 +36,7 @@ pub const Z_VIEW_DISTANCE: i64 = 300;
 pub const X_VIEW_DIST_M: f64 = X_VIEW_DISTANCE as f64 * TILE_SIZE;
 pub const Z_VIEW_DIST_M: f64 = Z_VIEW_DISTANCE as f64 * TILE_SIZE;
 /// Number of vertices of our mesh
-pub const TERRAIN_VERTICES: i64 = 60000;
+pub const TERRAIN_VERTICES: i64 = 30000;
 
 pub const PROB_TIGHTNESS: f64 = 100.0;
 

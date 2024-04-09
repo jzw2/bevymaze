@@ -2,6 +2,7 @@
 
 // use std::collections::HashMap;
 use bevy::core_pipeline::bloom::{BloomCompositeMode, BloomSettings};
+use bevy::window::WindowResolution;
 use std::f32::consts::PI;
 use std::net::Ipv4Addr;
 use std::rc::Rc;
@@ -457,20 +458,29 @@ fn main() {
         // .insert_resource(ClearColor(Color::rgb(0.5294, 0.8078, 0.9216)))
         .add_plugins(bevy_tokio_tasks::TokioTasksPlugin::default())
         .add_plugins(
-            DefaultPlugins.set(ImagePlugin {
-                default_sampler: ImageSamplerDescriptor {
-                    // address_mode_u: AddressMode::Repeat,
-                    // address_mode_v: AddressMode::Repeat,
-                    // address_mode_w: AddressMode::Repeat,
-                    mag_filter: ImageFilterMode::Linear,
-                    ..Default::default()
-                },
-            }), //.disable::<LogPlugin>(), // .set(RenderPlugin {
-                //     render_creation: Automatic(WgpuSettings {
-                //         features: WgpuFeatures::POLYGON_MODE_LINE,
-                //         ..default()
-                //     }),
-                // }),
+            DefaultPlugins
+                .set(ImagePlugin {
+                    default_sampler: ImageSamplerDescriptor {
+                        // address_mode_u: AddressMode::Repeat,
+                        // address_mode_v: AddressMode::Repeat,
+                        // address_mode_w: AddressMode::Repeat,
+                        mag_filter: ImageFilterMode::Linear,
+                        ..Default::default()
+                    },
+                })
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        resolution: WindowResolution::new(640., 480.)
+                            .with_scale_factor_override(1.0),
+                        ..default()
+                    }),
+                    ..default()
+                }), //.disable::<LogPlugin>(), // .set(RenderPlugin {
+                    //     render_creation: Automatic(WgpuSettings {
+                    //         features: WgpuFeatures::POLYGON_MODE_LINE,
+                    //         ..default()
+                    //     }),
+                    // }),
         )
         /*.add_plugins(
             ShaderUtilsPlugin,
@@ -478,7 +488,7 @@ fn main() {
         .add_plugins(TerrainPlugin {})
         .add_plugins(aether_spyglass::SpyglassPlugin)
         .add_plugins(FramepacePlugin)
-        .add_plugins(AtmospherePlugin)
+        // .add_plugins(AtmospherePlugin)
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
         .add_plugins(WanderlustPlugin::default())
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
