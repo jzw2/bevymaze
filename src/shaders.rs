@@ -26,7 +26,7 @@ use bevy::render::render_resource::{
 };
 use bevy::render::renderer::{RenderContext, RenderDevice, RenderQueue};
 use bevy::render::texture::{FallbackImage, GpuImage};
-use bevy::render::{render_graph, Render, RenderApp, RenderSet};
+use bevy::render::{render_graph, MainWorld, Render, RenderApp, RenderSet};
 use bevy_mod_debugdump::render_graph::Settings;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -42,7 +42,7 @@ pub const CURVATURE_MESH_VERTEX_OUTPUT: Handle<Shader> = Handle::weak_from_u128(
 
 pub const UTIL: Handle<Shader> = Handle::weak_from_u128(128742342344982);
 
-pub const MAX_VERTICES: usize = 100000;
+pub const MAX_VERTICES: usize = 200000;
 pub const MAX_TRIANGLES: usize = 2 * MAX_VERTICES - 5;
 
 #[derive(Resource)]
@@ -63,10 +63,11 @@ pub struct TerrainMaterialDataHolder {
     // the vertices of the mesh on the x-z plane
     // len is TERRAIN_VERTICES * 2
     pub(crate) mesh_vertices: BufferVec<f32>,
-    // TODO: implement transform the same way!
-    // // The transform applied to the mesh every frame
-    // #[storage(22, read_only, visibility(vertex, fragment, compute))]
-    // pub(crate) transform: Vec2,
+}
+
+#[derive(Resource)]
+pub struct TerrainVerticesCount {
+    pub(crate) triangle_indices_count: usize,
 }
 
 impl TerrainMaterialDataHolder {
@@ -228,8 +229,34 @@ impl Plugin for TerrainPlugin {
     }
 
     fn finish(&self, app: &mut App) {
+        // let mut count_res: Option<TerrainVerticesCount> = None;
+        // if let Some(terrain_data) = app.world.get_resource_mut::<TerrainMaterialDataHolder>() {
+        //     count_res = Some(TerrainVerticesCount {
+        //         triangle_indices_count: terrain_data.triangle_indices.len(),
+        //     });
+        // }
+
         let render_app = app.sub_app_mut(RenderApp);
         render_app.init_resource::<UpdateTerrainHeightsPipeline>();
+        // if let Some(count) = count_res {
+        //     render_app.world.insert_resource(count);
+        // }
+        render_app.add_systems(ExtractSchedule, get_comms.run_if(check_comms));
+    }
+}
+
+fn check_comms(maybe_comms: Option<Res<TerrainVerticesCount>>) -> bool {
+    maybe_comms.is_none()
+}
+
+fn get_comms(mut commands: Commands, mut world: ResMut<MainWorld>) {
+    let terrain_material_data_holder = world.get_resource::<TerrainMaterialDataHolder>();
+    if let Some(data_holder) = terrain_material_data_holder {
+        if data_holder.triangle_indices.len() > 0 {
+            commands.insert_resource(TerrainVerticesCount {
+                triangle_indices_count: data_holder.triangle_indices.len(),
+            });
+        }
     }
 }
 
@@ -343,7 +370,7 @@ impl render_graph::Node for UpdateTerrainVertexHeightsNode {
         render_context: &mut RenderContext,
         world: &World,
     ) -> Result<(), render_graph::NodeRunError> {
-        if let Some(terrain_data) = world.get_resource::<TerrainMaterialDataHolder>() {
+        if let Some(terrain_data) = world.get_resource::<TerrainVerticesCount>() {
             let render_terrain_material = world.resource::<RenderMaterials<TerrainMaterial>>();
             let (id, prepared_material) = render_terrain_material.0.iter().next().unwrap();
 
@@ -375,9 +402,13 @@ impl render_graph::Node for UpdateTerrainVertexHeightsNode {
                         .get_compute_pipeline(pipeline.update_pipeline)
                         .unwrap();
                     pass.set_pipeline(update_pipeline);
-                    println!("WG's {}", terrain_data.triangle_indices.len().div_ceil(64) as u32);
+                    // println!(
+                    //     "{} WG's {}",
+                    //     terrain_data.triangle_indices_count,
+                    //     terrain_data.triangle_indices_count.div_ceil(64) as u32
+                    // );
                     pass.dispatch_workgroups(
-                        terrain_data.triangle_indices.len().div_ceil(64) as u32,
+                        terrain_data.triangle_indices_count.div_ceil(64) as u32,
                         1,
                         1,
                     );

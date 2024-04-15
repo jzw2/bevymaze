@@ -1,3 +1,5 @@
+use crate::terrain_render::{LATTICE_GRID_SIZE, MainTerrain};
+use bevy::core::Zeroable;
 use bevy::core_pipeline::fxaa::Sensitivity;
 use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::math::DVec3;
@@ -6,8 +8,6 @@ use bevy::window::{CursorGrabMode, PrimaryWindow};
 use bevy_mod_wanderlust::ControllerInput;
 use bevy_rapier3d::prelude::*;
 use std::f32::consts::FRAC_2_PI;
-use bevy::core::Zeroable;
-use crate::terrain_render::MainTerrain;
 
 #[derive(Component, Default, Reflect)]
 #[reflect(Component)]
@@ -47,7 +47,10 @@ pub fn movement_input(
 
 pub fn mouse_look(
     mut cam: Query<&mut Transform, With<PlayerCam>>,
-    mut terrain: Query<&mut Transform, (With<MainTerrain>, Without<PlayerBody>, Without<PlayerCam>)>,
+    mut terrain: Query<
+        &mut Transform,
+        (With<MainTerrain>, Without<PlayerBody>, Without<PlayerCam>),
+    >,
     mut body: Query<&mut Transform, (With<PlayerBody>, Without<PlayerCam>)>,
     // sensitivity: Res<Sensitivity>,
     mut input: EventReader<MouseMotion>,
@@ -55,8 +58,6 @@ pub fn mouse_look(
     // let mut terrain_tf = terrain.iter_mut().next().unwrap();
     let mut cam_tf = cam.single_mut();
     let mut body_tf = body.single_mut();
-
-
 
     // let sens = sensitivity.0;
     let sens = 1.0; // TODO: come back to this
@@ -82,9 +83,10 @@ pub fn mouse_look(
     body_tf.rotate(Quat::from_scaled_axis(
         rot * Vec3::Y * cumulative.x / 180.0 * sens,
     ));
-
+    let mut new_trans = (body_tf.translation.clone() / LATTICE_GRID_SIZE as f32)/*.floor()*/ * LATTICE_GRID_SIZE as f32;
+    new_trans.y = 0.;
     for mut terrain_tf in terrain.iter_mut() {
-        terrain_tf.rotation = body_tf.rotation.inverse();
+        terrain_tf.translation = new_trans;
     }
 }
 

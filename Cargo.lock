@@ -1383,6 +1383,7 @@ dependencies = [
  "libnoise",
  "log",
  "noise",
+ "ordered-float",
  "petgraph",
  "postcard",
  "qoi",

@@ -106,10 +106,20 @@ fn is_in_path(pos: vec2<f32>) -> bool {
     return true;
 }
 
+fn is_in_flower(pos: vec2<f32>) -> bool {
+    let rand = hash12(pos * hash11(layer_height));
+    return rand > 0.999;
+}
+
 @fragment
 fn fragment(
     in: CuravtureMeshVertexOutput,
 ) -> @location(0) vec4<f32> {
+
+    if layer_height == 0.0 {
+        discard;
+    }
+
     var pbr = pbr_input_new();
     pbr.frag_coord = in.position;
     pbr.world_position = in.world_position;
@@ -137,23 +147,27 @@ fn fragment(
     pbr.N = pbr.world_normal;
     pbr.V = pbr_functions::calculate_view(in.world_position, false);
 
-    let height_frac = in.original_world_position[1] / max_height + 0.0; //0.08 * perlin_noise_2d(pos_vector);
+    let height_frac = in.original_world_position.y / max_height + 0.0; //0.08 * perlin_noise_2d(pos_vector);
     if (height_frac >= grass_line) {
         discard;
     }
 
-    let leaf = floor(in.world_position.xz * 10.0f);
+    let leaf = floor(in.world_position.xz * 20.0f);
 
-    if is_in_path(in.world_position.xz) {
+    if is_in_path(in.original_world_position.xz / 2.0) {
         discard;
     }
 
-    let rand = hash12(leaf);
-    let norm_l_height = layer_height / 3.0f;
-    if rand > hash11(layer_height) * 0.9 {
-        pbr.material.base_color = grass_color * norm_l_height;
+    if is_in_flower(leaf) {
+        pbr.material.base_color = vec4<f32>(149.0/255.0, 68.0/255.0, 166.0/255.0, 1.0);
     } else {
-        discard;
+        let rand = hash12(leaf * layer_height);
+        let norm_l_height = layer_height / 2.5f;
+        if rand < 0.7 {
+            pbr.material.base_color = grass_color * norm_l_height;
+        } else {
+            discard;
+        }
     }
 
     pbr.material.perceptual_roughness = 0.98;

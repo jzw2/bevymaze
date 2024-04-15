@@ -2,6 +2,7 @@
 
 // use std::collections::HashMap;
 use bevy::core_pipeline::bloom::{BloomCompositeMode, BloomSettings};
+use bevy::prelude::Color;
 use bevy::window::WindowResolution;
 use std::f32::consts::PI;
 use std::net::Ipv4Addr;
@@ -20,9 +21,10 @@ use crate::shaders::{
 };
 // use crate::terrain_loader::get_chunk;
 use crate::terrain_render::{
-    create_base_lattice, create_lattice_plane, create_terrain_height_map, create_terrain_mesh,
-    create_terrain_normal_map, MainTerrain, SCALE, TERRAIN_VERTICES, TEXTURE_SCALE,
-    X_VIEW_DISTANCE, X_VIEW_DIST_M, Z_VIEW_DISTANCE, Z_VIEW_DIST_M,
+    create_base_lattice, create_base_lattice_with_verts, create_lattice_plane,
+    create_terrain_height_map, create_terrain_mesh, create_terrain_normal_map, MainTerrain, SCALE,
+    TERRAIN_VERTICES, TEXTURE_SCALE, X_VIEW_DISTANCE, X_VIEW_DIST_M, Z_VIEW_DISTANCE,
+    Z_VIEW_DIST_M,
 };
 use bevy::log::LogPlugin;
 use bevy::math::{DVec2, Vec3};
@@ -47,12 +49,16 @@ use crate::terrain_loader::{
 };
 use crate::ui::*;
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
+use bevy::pbr::wireframe::{WireframeColor, WireframeConfig, WireframePlugin};
 use bevy::render::render_resource::{
     Buffer, BufferUsages, BufferVec, Extent3d, OwnedBindingResource, PreparedBindGroup,
     StorageBuffer, TextureDimension, TextureFormat, TextureUsages,
 };
 use bevy::render::renderer::{RenderDevice, RenderQueue};
+use bevy::render::settings::RenderCreation::Automatic;
+use bevy::render::settings::{WgpuFeatures, WgpuSettings};
 use bevy::render::texture::{ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
+use bevy::render::RenderPlugin;
 use bevy_atmosphere::prelude::*;
 use bevy_framepace::{FramepacePlugin, FramepaceSettings, Limiter};
 use bevy_mod_debugdump::render_graph::Settings;
@@ -63,7 +69,7 @@ use delaunator::{triangulate, Point};
 use futures_util::{FutureExt, Stream, StreamExt};
 use rand::Rng;
 use server::connection::*;
-use server::terrain_gen::{TerrainGenerator, MAX_HEIGHT, TILE_SIZE};
+use server::terrain_gen::{TerrainGenerator, FOOTHILL_START, MAX_HEIGHT, TILE_SIZE};
 use server::util::{cart_to_polar, lin_map};
 use wasm_bindgen::prelude::wasm_bindgen;
 
@@ -393,40 +399,51 @@ fn create_terrain(
                         ..default()
                     });
                 });
-            commands.spawn((
-                MaterialMeshBundle {
-                    mesh: meshes.add(terrain_mesh.clone()),
-                    transform: Transform::from_xyz(0.0, 0.0, 0.0),
-                    material: materials.add(base_material.clone()),
-                    ..default()
-                },
-                MainTerrain,
-            ));
-
-            maze_data_holder
-                .raw_maze_data
-                .write_buffer(&*render_device, &*render_queue);
-
-            const LAYER_COUNT: u32 = 0;
-            for layer in 0..LAYER_COUNT {
-                commands.spawn((
-                    MaterialMeshBundle {
-                        mesh: meshes.add(terrain_mesh.clone()),
-                        transform: Transform::from_xyz(0.0, 0.0, 0.0),
-                        material: maze_materials.add(ExtendedMaterial {
-                            base: base_material.clone(),
-                            extension: MazeLayerMaterial {
-                                layer_height: 2.5 * layer as f32 * 1.0 / (LAYER_COUNT as f32),
-                                data: maze_data_holder.raw_maze_data.buffer().unwrap().clone(),
-                                maze_top_left: Vec2::ZERO,
-                            },
-                        }),
-                        ..default()
-                    },
-                    MainTerrain,
-                ));
-            }
         });
+
+    commands.spawn((
+        MaterialMeshBundle {
+            mesh: meshes.add(terrain_mesh.clone()),
+            transform: Transform::from_xyz(0.0, 0.0, 0.0),
+            material: materials.add(base_material.clone()),
+            ..default()
+        },
+        MainTerrain,
+    ));
+
+    maze_data_holder
+        .raw_maze_data
+        .write_buffer(&*render_device, &*render_queue);
+
+    const LAYER_COUNT: u32 = 32;
+    for layer in 0..LAYER_COUNT {
+        let maze_layer_mesh = create_terrain_mesh(Some(create_base_lattice_with_verts(
+            TERRAIN_VERTICES as f64,
+            lin_map(
+                0.,
+                LAYER_COUNT as f64,
+                10.,
+                FOOTHILL_START + 1000.,
+                layer as f64,
+            ),
+        )));
+        commands.spawn((
+            MaterialMeshBundle {
+                mesh: meshes.add(maze_layer_mesh),
+                transform: Transform::from_xyz(0.0, 0.0, 0.0),
+                material: maze_materials.add(ExtendedMaterial {
+                    base: base_material.clone(),
+                    extension: MazeLayerMaterial {
+                        layer_height: 2.0 * layer as f32 / (LAYER_COUNT as f32 - 1.0),
+                        data: maze_data_holder.raw_maze_data.buffer().unwrap().clone(),
+                        maze_top_left: Vec2::ZERO,
+                    },
+                }),
+                ..default()
+            },
+            MainTerrain,
+        ));
+    }
 
     // commands.entity(controller).push_children(&[terrain]);
 }
@@ -437,6 +454,55 @@ pub fn spawn_maze(
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
 ) {
+}
+
+/// This system let's you toggle various wireframe settings
+fn update_colors(
+    keyboard_input: Res<Input<KeyCode>>,
+    mut config: ResMut<WireframeConfig>,
+    mut wireframe_colors: Query<&mut WireframeColor>,
+    mut text: Query<&mut Text>,
+) {
+    text.single_mut().sections[0].value = format!(
+        "
+Controls
+---------------
+Z - Toggle global
+X - Change global color
+C - Change color of the green cube wireframe
+
+WireframeConfig
+-------------
+Global: {}
+Color: {:?}
+",
+        config.global, config.default_color,
+    );
+
+    // Toggle showing a wireframe on all meshes
+    if keyboard_input.just_pressed(KeyCode::Z) {
+        config.global = !config.global;
+    }
+
+    // Toggle the global wireframe color
+    if keyboard_input.just_pressed(KeyCode::X) {
+        config.default_color = if config.default_color == Color::WHITE.into() {
+            Color::PINK.into()
+        } else {
+            Color::WHITE.into()
+        };
+    }
+
+    // Toggle the color of a wireframe using WireframeColor and not the global color
+    if keyboard_input.just_pressed(KeyCode::C) {
+        for mut color in &mut wireframe_colors {
+            color.color = if color.color == Color::LIME_GREEN.into() {
+                Color::RED.into()
+            } else {
+                Color::LIME_GREEN.into()
+            };
+        }
+    }
 }
 
 #[wasm_bindgen]
@@ -475,20 +541,21 @@ fn main() {
                         ..default()
                     }),
                     ..default()
-                }), //.disable::<LogPlugin>(), // .set(RenderPlugin {
-                    //     render_creation: Automatic(WgpuSettings {
-                    //         features: WgpuFeatures::POLYGON_MODE_LINE,
-                    //         ..default()
-                    //     }),
-                    // }),
+                })
+                .disable::<LogPlugin>()
+                .set(RenderPlugin {
+                    render_creation: Automatic(WgpuSettings {
+                        features: WgpuFeatures::POLYGON_MODE_LINE,
+                        ..default()
+                    }),
+                }),
         )
         /*.add_plugins(
             ShaderUtilsPlugin,
         )*/
-        .add_plugins(TerrainPlugin {})
         .add_plugins(aether_spyglass::SpyglassPlugin)
         .add_plugins(FramepacePlugin)
-        // .add_plugins(AtmospherePlugin)
+        .add_plugins(AtmospherePlugin)
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
         .add_plugins(WanderlustPlugin::default())
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
@@ -517,7 +584,7 @@ fn main() {
             )),
         })
         // .add_plugins(RapierDebugRenderPlugin::default())
-        // .add_plugins(WireframePlugin)
+        .add_plugins(WireframePlugin)
         .add_systems(Startup, add_lighting)
         .add_systems(Startup, spawn_player)
         .add_systems(Update, (movement_input, mouse_look, toggle_cursor_lock))
@@ -531,10 +598,13 @@ fn main() {
         .add_systems(
             Update,
             (update_transform_res, stream_terrain_mesh, stream_maze_mesh),
-        );
+        )
+        .add_plugins(TerrainPlugin {});
 
     app.add_systems(Startup, setup_fps_counter);
     app.add_systems(Update, (fps_text_update_system, fps_counter_showhide));
+
+    app.add_systems(Update, update_colors);
 
     app.run();
 }

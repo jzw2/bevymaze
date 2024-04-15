@@ -1,4 +1,4 @@
-use crate::maze_gen::{populate_maze, CompressedMaze, Maze, MazeComponent};
+use crate::maze_gen::{populate_maze, Maze, MazeBitRep, MazeComponent};
 use bitvec::bitvec;
 use bitvec::prelude::BitVec;
 use postcard::{from_bytes, to_stdvec};
@@ -41,22 +41,9 @@ impl SquareMaze {
         return (self.cell.0 * self.size, self.cell.1 * self.size);
     }
 
-    pub fn bit_rep(&self) -> CompressedSquareMaze {
-        let mut bits = bitvec![0; (self.size*self.size) as usize*2];
-        for x in 0..self.size {
-            for y in 0..self.size {
-                let node = (x + self.offset().0, y + self.offset().1);
-                let pos = 2 * (x + y * self.size) as usize;
-                if self.maze.contains_edge(node, (node.0 - 1, node.1)) {
-                    bits.set(pos, true);
-                }
-                if self.maze.contains_edge(node, (node.0, node.1 - 1)) {
-                    bits.set(pos + 1, true);
-                }
-            }
-        }
+    pub fn compressed(&self) -> CompressedSquareMaze {
         return CompressedSquareMaze {
-            edges: bits,
+            edges: self.bit_rep(),
             size: self.size,
             cell: self.cell,
         };
@@ -119,7 +106,7 @@ pub struct CompressedSquareMaze {
     /// For a cell `(x,y)` the left, top, right, and bottom edges exist based on the values of
     /// `edges[2*(x + y*size)], edges[2*(x + y*size) + 1], edges[2*(x + 1 + y*size)], edges[2*(x + (y+1)*size) + 1]`
     /// respectively
-    pub edges: BitVec,
+    pub edges: BitVec<u32>,
     /// the amount of cells on one side
     pub size: i64,
     /// the offset of nodes
@@ -155,7 +142,7 @@ impl Maze<SquareNode> for SquareMaze {
             .iter()
             .filter_map(|n| match self.is_outside_maze(*n, 0) {
                 true => None,
-                false => Some(*n)
+                false => Some(*n),
             })
             .collect();
 
@@ -184,16 +171,24 @@ impl Maze<SquareNode> for SquareMaze {
     }
 }
 
-impl CompressedMaze for SquareMaze {
-    fn compressed(&self) -> BitVec<u32> {
-        let mut vec = BitVec::new();
-        for x in 0..self.size {
-            for y in 0..self.size {
-                vec.push(self.maze.contains_edge((x - 1, y), (x, y)));
-                vec.push(self.maze.contains_edge((x, y - 1), (x, y)));
+impl MazeBitRep for SquareMaze {
+    fn bit_rep(&self) -> BitVec<u32> {
+        let mut bits: BitVec<u32> =
+            BitVec::from_vec(vec![0u32; (self.size * self.size * 2 / 32) as usize]);
+        let (x, y) = self.offset();
+        for i in 0..self.size {
+            for j in 0..self.size {
+                let node = (i + x, j + y);
+                let pos = 2 * (i + j * self.size) as usize;
+                if self.maze.contains_edge(node, (node.0 - 1, node.1)) {
+                    bits.set(pos, true);
+                }
+                if self.maze.contains_edge(node, (node.0, node.1 - 1)) {
+                    bits.set(pos + 1, true);
+                }
             }
         }
-        return vec;
+        return bits;
     }
 }
 

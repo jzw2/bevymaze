@@ -58,3 +58,4 @@ tokio = "1.35.1"
 postcard = { version = "1.0.8", features = ["use-std"] }
 bevy-tokio-tasks = { git = "https://github.com/foxzool/bevy-tokio-tasks.git", version = "0.12.0" }
 hilbert = "0.1.2"
+ordered-float = "4.2.0"

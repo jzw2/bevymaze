@@ -2,7 +2,7 @@ use futures_util::{SinkExt, StreamExt};
 use log::*;
 use postcard::{from_bytes, to_stdvec};
 use server::connection::{MazeCell, MazeNetworkRequest, MazeNetworkResponse, TerrainDataPoint};
-use server::maze_gen::CompressedMaze;
+use server::maze_gen::MazeBitRep;
 use server::square_maze_gen::{load_or_generate_component, SQUARE_MAZE_CELL_COUNT};
 use server::terrain_gen::TerrainGenerator;
 use std::net::SocketAddr;
@@ -58,11 +58,13 @@ async fn handle_connection(peer: SocketAddr, stream: TcpStream) -> Result<()> {
                             let [x, y] = cell;
                             return MazeCell {
                                 cell: [*x, *y],
-                                data: load_or_generate_component((*x as i64, *y as i64))
-                                    .compressed(),
+                                data: load_or_generate_component((*x as i64, *y as i64)).bit_rep(),
                             };
                         })
                         .collect();
+                    for data in &filled {
+                        println!("RM DATA {:?}", data.data.clone().into_vec());
+                    }
                     ws_stream
                         .send(Binary(
                             to_stdvec(&MazeNetworkResponse::Maze(filled)).unwrap(),
@@ -172,13 +174,13 @@ async fn main() {
     let addr = "127.0.0.1:9002";
     let listener = TcpListener::bind(&addr).await.expect("Can't listen");
     info!("Listening on: {}", addr);
-    
+
     while let Ok((stream, _)) = listener.accept().await {
         let peer = stream
             .peer_addr()
             .expect("connected streams should have a peer address");
         info!("Peer address: {}", peer);
-    
+
         tokio::spawn(accept_connection(peer, stream));
     }
 }

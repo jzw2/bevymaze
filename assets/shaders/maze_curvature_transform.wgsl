@@ -2,7 +2,7 @@
 #import bevy_pbr::mesh_bindings       mesh
 #import bevy_pbr::mesh_view_bindings
 //#import bevy_pbr::mesh_vertex_output  MeshVertexOutput
-#import bevymaze::util::{lin_map, hash}
+#import bevymaze::util::{lin_map, hash11}
 #import bevymaze::curvature_mesh_vertex_output  CuravtureMeshVertexOutput
 
 #import bevy_pbr::mesh_functions
@@ -109,7 +109,7 @@ fn barycentric(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>, c: vec2<f32>) -> vec3<f
     return vec3<f32>(v, w, 1.0 - v - w);
 }
 
-fn interp(ai: u32, bi: u32, ci: u32, triangle: u32, bary: vec2<f32>) -> f32 {
+fn interp(ai: u32, bi: u32, ci: u32, bary: vec2<f32>) -> f32 {
     let x: f32 = bary.x;
     let y: f32 = bary.y;
 
@@ -166,12 +166,11 @@ fn vertex(vertex_no_morph: Vertex) -> CuravtureMeshVertexOutput {
         let b = vec2<f32>(vertices[bi], vertices[bi + 1u]);
         let c = vec2<f32>(vertices[ci], vertices[ci + 1u]);
         let bary = barycentric(out.world_position.xz, a, b, c);
-        out.world_position.y = interp(ai / 2u, bi / 2u, ci / 2u, found / 3u, bary.xy)
+        let height_hash = hash11(layer_height);
+        let perturbance = sin(3.0 * height_hash * out.world_position.xz);
+        out.world_position.y = interp(ai / 2u, bi / 2u, ci / 2u, bary.xy)
             + layer_height
-            + 0.1*layer_height*sin(1.0*(2.0*layer_height + 2.0*out.world_position.x))*sin(1.0*(layer_height + 2.0*out.world_position.z));
-//        if out.world_position.y > 3000.0 {
-//            out.world_position.y = 0.0;
-//        }
+            + 0.3 * perturbance.x * perturbance.y;
     } else {
         out.world_position.y = 0.0;
     }
@@ -187,28 +186,28 @@ fn vertex(vertex_no_morph: Vertex) -> CuravtureMeshVertexOutput {
     /// where r_e is the radius of the earth and v is the vertex's world pos
     let view_world_pos = bevy_pbr::mesh_view_bindings::view.world_position.xyz;
     let rel_pos = out.world_position.xyz - view_world_pos;
-    let origin_dist: f32 = sqrt(rel_pos[0]*rel_pos[0] + rel_pos[2]*rel_pos[2]);
+    let origin_dist: f32 = sqrt(rel_pos.x*rel_pos.x + rel_pos.z*rel_pos.z);
     if origin_dist > 1000.0 {
         // only apply our transformation at large distances, because otherwise
         // rounding errors become noticable
         let EARTH_RAD: f32 = (6.378e+6);
         let theta: f32 = origin_dist / EARTH_RAD;
-        let r = EARTH_RAD + out.world_position[1];
+        let r = EARTH_RAD + out.world_position.y;
         let unrotated_pos = vec3<f32>(r * sin(theta), r * (cos(theta) - 1.0), 0.0);
         /// Now we rotate it to match the original
         /// (signed) angle of the original is phi = atan2(v_z, v_x * v_z)
         var phi: f32 = 0.0;
         if (rel_pos[0] != 0.0) {
-            phi = -atan2(rel_pos[2], rel_pos[0]);
+            phi = -atan2(rel_pos.z, rel_pos.x);
         }
         let rotation_mat = mat3x3<f32>(cos(phi), 0.0, -sin(phi), 0.0, 1.0, 0.0, sin(phi), 0.0, cos(phi));
         let mapped: vec3<f32> = rotation_mat*unrotated_pos + view_world_pos;
         out.world_position =
             vec4<f32>(
-                mapped[0],
-                mapped[1] + out.world_position[1] - view_world_pos[1],
-                mapped[2],
-                out.world_position[3]);
+                mapped.x,
+                mapped.y + out.world_position.y - view_world_pos.y,
+                mapped.z,
+                out.world_position.w);
     }
     out.position = position_world_to_clip(out.world_position.xyz);
 #endif

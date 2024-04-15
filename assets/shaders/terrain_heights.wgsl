@@ -163,8 +163,8 @@ fn update(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 //        if previous == max_u32 {
 //            previous = 0u;
 //        }
-        // let found = find_triangle(vertex, previous);
-        // triangle_indices[vertex_idx] = found;
+         let found = find_triangle(vertex, previous);
+         triangle_indices[vertex_idx] = found;
     }
 
 //     let vert_count = arrayLength(&mesh_vertices) / 2u;

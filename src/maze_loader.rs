@@ -6,9 +6,11 @@ use bevy::pbr::ExtendedMaterial;
 use bevy::prelude::{Commands, Deref, Res, ResMut, Resource};
 use bevy::render::renderer::{RenderDevice, RenderQueue};
 use bevy_tokio_tasks::TokioTasksRuntime;
+use bitvec::vec::BitVec;
 use crossbeam_channel::{bounded, Receiver};
 use futures_lite::StreamExt;
 use futures_util::SinkExt;
+use image::{ImageBuffer, Rgb, RgbImage};
 use postcard::{from_bytes, to_stdvec};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message::Binary;
@@ -142,6 +144,41 @@ pub fn stream_maze_mesh(
     let last = receiver.try_iter().last();
     if let Some(update) = last {
         println!("Setting maze data");
+        const WIDTH: u32 = (MAZE_CELLS_X as i64 * SQUARE_MAZE_CELL_COUNT * 2) as u32;
+        const HEIGHT: u32 = (MAZE_CELLS_Y as i64 * SQUARE_MAZE_CELL_COUNT * 2) as u32;
+        let mut image: RgbImage = ImageBuffer::from_pixel(WIDTH, HEIGHT, Rgb([0, 0, 0]));
+
+        for i in 0..WIDTH / 2 {
+            for j in 0..HEIGHT / 2 {
+                *image.get_pixel_mut(i * 2, j * 2) = Rgb([255, 255, 255]);
+            }
+        }
+
+        for i in 0..MAZE_CELLS_X as i64 {
+            for j in 0..MAZE_CELLS_Y as i64 {
+                let bits = BitVec::<u32>::from_vec(Vec::from(update.data[i as usize][j as usize]));
+                for s in 0..SQUARE_MAZE_CELL_COUNT {
+                    for t in 0..SQUARE_MAZE_CELL_COUNT {
+                        // check for the left edge
+                        let cpx = 2 * (i * SQUARE_MAZE_CELL_COUNT + s);
+                        let cpy = 2 * (j * SQUARE_MAZE_CELL_COUNT + t);
+                        let pos = 2 * (s + t * SQUARE_MAZE_CELL_COUNT) as usize;
+
+                        if bits[pos] {
+                            let lp = (cpx, cpy + 1);
+                            *image.get_pixel_mut(lp.0 as u32, lp.1 as u32) = Rgb([255, 255, 255]);
+                        }
+
+                        if bits[pos + 1] {
+                            let tp = (cpx + 1, cpy);
+                            *image.get_pixel_mut(tp.0 as u32, tp.1 as u32) = Rgb([255, 255, 255]);
+                        }
+                    }
+                }
+            }
+        }
+
+        image.save("maze_loader_output.png").unwrap();
 
         terrain_material_data_holder.raw_maze_data.set(update.data);
         terrain_material_data_holder
@@ -154,8 +191,8 @@ pub fn stream_maze_mesh(
     }
 }
 
-pub(crate) const MAZE_CELLS_X: usize = 4;
-pub(crate) const MAZE_CELLS_Y: usize = 4;
+pub(crate) const MAZE_CELLS_X: usize = 8;
+pub(crate) const MAZE_CELLS_Y: usize = MAZE_CELLS_X;
 pub(crate) const MAZE_DATA_COUNT: usize =
     (2 * SQUARE_MAZE_CELL_COUNT * SQUARE_MAZE_CELL_COUNT / 32) as usize;
 

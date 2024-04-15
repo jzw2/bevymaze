@@ -9,11 +9,12 @@ use bevy::prelude::{Component, Image, Mesh, Reflect, Resource};
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_resource::TextureFormat::{R32Float, Rgba8Snorm};
 use bevy::render::render_resource::{Extent3d, TextureDimension};
-use delaunator::triangulate;
+use delaunator::{triangulate, Triangulation};
 // use fixed::types::extra::{U12, U13};
 // use fixed::FixedI32;
 use futures_util::{pin_mut, Stream, StreamExt};
 use image::{ImageBuffer, Rgb, RgbImage};
+use ordered_float::OrderedFloat;
 // use rand::{thread_rng, Rng};
 // use tokio::net::TcpStream;
 // use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -31,17 +32,19 @@ type TileOffset = TilePosition;
 
 /// Number of chunks in each dir
 pub const X_VIEW_DISTANCE: i64 = 30;
-pub const Z_VIEW_DISTANCE: i64 = 300;
+pub const Z_VIEW_DISTANCE: i64 = 250;
 /// Number of meters in each dir
 pub const X_VIEW_DIST_M: f64 = X_VIEW_DISTANCE as f64 * TILE_SIZE;
 pub const Z_VIEW_DIST_M: f64 = Z_VIEW_DISTANCE as f64 * TILE_SIZE;
 /// Number of vertices of our mesh
-pub const TERRAIN_VERTICES: i64 = 30000;
+pub const TERRAIN_VERTICES: i64 = 90000;
 
 pub const PROB_TIGHTNESS: f64 = 100.0;
 
 pub const SCALE: f64 = 0.15;
 pub const TEXTURE_SCALE: f64 = 0.0001;
+
+pub const LATTICE_GRID_SIZE: f64 = 0.5;
 
 #[derive(Component, Default, Reflect)]
 #[reflect(Component)]
@@ -115,7 +118,7 @@ pub fn create_lattice_plane(
     x_view_distance: f64,
     z_view_distance: f64,
 ) -> Vec<DVec3> {
-    let mut verts: Vec<DVec3> = vec![];
+    let mut verts: HashSet<[OrderedFloat<f64>; 2]> = HashSet::new();
     let x_bound = (x_view_distance * SCALE).asinh() / SCALE;
     let z_bound = (z_view_distance * SCALE).asinh() / SCALE;
     let aspect_ratio = x_bound / z_bound;
@@ -159,11 +162,18 @@ pub fn create_lattice_plane(
                 x_bound,
                 x_idx as f64 + 0.5 * (z_idx % 2) as f64,
             );
-            verts.push(DVec3::new(x_pos, 0., z_pos));
+            let x_pos = (x_pos / LATTICE_GRID_SIZE)/*.floor()*/ * LATTICE_GRID_SIZE;
+            let z_pos = (z_pos / LATTICE_GRID_SIZE)/*.floor()*/ * LATTICE_GRID_SIZE;
+            if x_pos <= x_view_distance && z_pos <= z_view_distance {
+                verts.insert([OrderedFloat(x_pos), OrderedFloat(z_pos)]);
+            }
         }
     }
 
-    return verts;
+    return verts
+        .into_iter()
+        .map(|v| DVec3::new(v[0].0, 0., v[1].0))
+        .collect();
 }
 
 /// Here we sample assuming the probability dist
@@ -178,9 +188,6 @@ pub fn transform_lattice_positions(lattice: &mut Vec<DVec3>, rounding: Option<f6
         let scale_fac = ((mag * SCALE).sinh() / SCALE) / mag;
         lattice_pos.x *= scale_fac;
         lattice_pos.z *= scale_fac;
-        // let pol = cart_to_polar((lattice_pos.x, lattice_pos.z));
-        // lattice_pos.x = (pol.0 * SCALE).sinh() / SCALE * pol.1.cos();
-        // lattice_pos.z = (pol.0 * SCALE).sinh() / SCALE * pol.1.sin();
         // round the transformed pos to the nearest grid pos (quarter of a meter)
         if let Some(rounding) = rounding {
             lattice_pos.x = (lattice_pos.x / rounding).round() * rounding;
@@ -192,6 +199,14 @@ pub fn transform_lattice_positions(lattice: &mut Vec<DVec3>, rounding: Option<f6
     // for lattice_pos in lattice {
     //     if lattice_pos
     // }
+}
+
+pub fn length_order_verts(verts: &mut Vec<DVec3>) {
+    verts.sort_by(|v1, v2| {
+        v1.length_squared()
+            .partial_cmp(&v2.length_squared())
+            .unwrap()
+    });
 }
 
 /// Order the points into a hilbert curve
@@ -283,31 +298,118 @@ pub fn compose_terrain_mesh(lattice: Vec<DVec3>, generator: &TerrainGenerator) -
 }
 
 /// Create a terrain mesh from the generator
-pub fn create_terrain_mesh_from_generator(generator: &TerrainGenerator) -> Mesh {
-    let mut verts = create_lattice_plane(TERRAIN_VERTICES as f64, X_VIEW_DIST_M, Z_VIEW_DIST_M);
-    transform_lattice_positions(&mut verts, Some(0.125));
-    hilbert_order_verts(&mut verts, X_VIEW_DIST_M, Z_VIEW_DIST_M);
-    return compose_terrain_mesh(verts, &generator);
-}
+// pub fn create_terrain_mesh_from_generator(generator: &TerrainGenerator) -> Mesh {
+//     let mut verts = create_lattice_plane(
+//         TERRAIN_VERTICES as f64,
+//         X_VIEW_DIST_M,
+//         Z_VIEW_DIST_M,
+//         X_VIEW_DIST_M.max(Z_VIEW_DIST_M),
+//     );
+//     transform_lattice_positions(&mut verts, Some(0.125));
+//     hilbert_order_verts(&mut verts, X_VIEW_DIST_M, Z_VIEW_DIST_M);
+//     length_order_verts(&mut verts);
+//     return compose_terrain_mesh(verts, &generator);
+// }
 
 pub fn create_base_lattice() -> Vec<DVec3> {
-    return create_base_lattice_with_verts(TERRAIN_VERTICES as f64);
+    return create_base_lattice_with_verts(
+        TERRAIN_VERTICES as f64,
+        X_VIEW_DIST_M.max(Z_VIEW_DIST_M),
+    );
 }
 
-pub fn create_base_lattice_with_verts(approx_vertex_count: f64) -> Vec<DVec3> {
-    return create_lattice(approx_vertex_count, X_VIEW_DIST_M, Z_VIEW_DIST_M);
+pub fn create_base_lattice_with_verts(approx_vertex_count: f64, max_dist: f64) -> Vec<DVec3> {
+    return create_lattice(approx_vertex_count, X_VIEW_DIST_M, Z_VIEW_DIST_M, max_dist);
 }
 
-pub fn create_lattice(approx_vertex_count: f64, x_view_dist: f64, z_view_dist: f64) -> Vec<DVec3> {
+pub fn create_lattice(
+    approx_vertex_count: f64,
+    x_view_dist: f64,
+    z_view_dist: f64,
+    max_dist: f64,
+) -> Vec<DVec3> {
     let mut verts = create_lattice_plane(approx_vertex_count, x_view_dist, z_view_dist);
     transform_lattice_positions(&mut verts, None);
     hilbert_order_verts(&mut verts, x_view_dist, z_view_dist);
-    return verts;
+    length_order_verts(&mut verts);
+    let max_dist_sqr = max_dist * max_dist;
+    let v: Vec<DVec3> = verts
+        .into_iter()
+        .filter(|v| v.length_squared() <= max_dist_sqr)
+        .collect();
+    println!("v after filt {}", v.len());
+    return v;
+}
+
+fn fix_quads(triangulation: &mut Triangulation, verts: &Vec<DVec3>) {
+    // we iterate over all the triangles and fix the quads
+    let mut fixed = HashSet::<usize>::new();
+    for tri in 0..triangulation.len() {
+        // get the most top-left vertex
+        // first move everything to the top-left quadrant
+        let (a, b, c) = (3 * tri, 3 * tri + 1, 3 * tri + 2);
+        let (a, b, c) = (
+            triangulation.triangles[a],
+            triangulation.triangles[b],
+            triangulation.triangles[c],
+        );
+        let (a, b, c) = (verts[a], verts[b], verts[c]);
+        let bottom_left = a.max(b).max(c);
+        let (a, b, c) = (a - bottom_left, b - bottom_left, c - bottom_left);
+        // now the top-left most vertex is what we base everything else off of
+        let (a_mag, b_mag, c_mag) = (a.length_squared(), b.length_squared(), c.length_squared());
+        let max = a_mag.max(b_mag).max(c_mag);
+        let a: usize;
+        let b: usize;
+        let c: usize;
+        if max == a_mag {
+            a = 3 * tri;
+            b = 3 * tri + 1;
+            c = 3 * tri + 2;
+        } else if max == b_mag {
+            a = 3 * tri + 1;
+            b = 3 * tri + 2;
+            c = 3 * tri;
+        } else {
+            a = 3 * tri + 2;
+            b = 3 * tri;
+            c = 3 * tri + 1;
+        }
+        let d = triangulation.halfedges[a] + 1;
+        let other_tri = d / 3;
+        if d == triangulation.triangles.len() || fixed.contains(&tri) || fixed.contains(&other_tri)
+        {
+            continue;
+        }
+
+        let (t_a, t_b, t_c, t_d) = (
+            triangulation.triangles[a],
+            triangulation.triangles[b],
+            triangulation.triangles[c],
+            triangulation.triangles[d],
+        );
+
+        // now check if it forms a small square
+        if verts[t_a] + DVec3::new(LATTICE_GRID_SIZE, 0., 0.) == verts[t_c]
+            && verts[t_a] + DVec3::new(LATTICE_GRID_SIZE, 0., LATTICE_GRID_SIZE) == verts[t_b]
+            && verts[t_a] + DVec3::new(0., 0., LATTICE_GRID_SIZE) == verts[t_d]
+        {
+            // we're a backwards square, so we should flip the triangulation
+            triangulation.triangles[3 * tri] = t_a;
+            triangulation.triangles[3 * tri + 1] = t_d;
+            triangulation.triangles[3 * tri + 2] = t_b;
+            triangulation.triangles[3 * other_tri] = t_d;
+            triangulation.triangles[3 * other_tri + 1] = t_b;
+            triangulation.triangles[3 * other_tri + 2] = t_c;
+            fixed.insert(tri);
+            fixed.insert(other_tri);
+        }
+    }
 }
 
 /// Create a terrain mesh but without baked heights
 pub fn create_terrain_mesh(lattice: Option<Vec<DVec3>>) -> Mesh {
-    let mut verts: Vec<DVec3>;
+    let verts: Vec<DVec3>;
     if let Some(provided_verts) = lattice {
         verts = provided_verts;
     } else {
@@ -321,7 +423,7 @@ pub fn create_terrain_mesh(lattice: Option<Vec<DVec3>>) -> Mesh {
     let mut delauney_verts: Vec<delaunator::Point> = vec![];
 
     // we break the mesh down into component parts
-    for vertex in verts {
+    for vertex in &verts {
         let mut new_vec = vertex.as_vec3().to_array();
         let normal = [0.0, 1.0, 0.0];
         vertices.push((new_vec, normal, [vertex.x as f32, vertex.z as f32]));
@@ -336,11 +438,9 @@ pub fn create_terrain_mesh(lattice: Option<Vec<DVec3>>) -> Mesh {
     terrain_mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     terrain_mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     terrain_mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-    let indices = triangulate(&delauney_verts)
-        .triangles
-        .iter()
-        .map(|i| *i as u32)
-        .collect();
+    let mut triangulation = triangulate(&delauney_verts);
+    fix_quads(&mut triangulation, &verts);
+    let indices: Vec<u32> = triangulation.triangles.iter().map(|i| *i as u32).collect();
     terrain_mesh.set_indices(Some(Indices::U32(indices)));
     return terrain_mesh;
 }

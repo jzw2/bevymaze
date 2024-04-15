@@ -26,6 +26,7 @@ use kiddo::{ImmutableKdTree, SquaredEuclidean};
 use postcard::{from_bytes, to_stdvec, to_vec};
 use rand::rngs::StdRng;
 use rand::{thread_rng, Rng, SeedableRng};
+use server::connection::MazeNetworkResponse::TerrainHeights;
 use server::connection::*;
 use server::terrain_gen::TILE_SIZE;
 use server::util::{barycentric32, lin_map};
@@ -39,7 +40,6 @@ use tokio_tungstenite::tungstenite::Error;
 use tokio_tungstenite::tungstenite::Message::Binary;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use url::Url;
-use server::connection::MazeNetworkResponse::TerrainHeights;
 
 /// Quarter meter data tolerance when the player is 1m away
 const DATA_TOLERANCE: f64 = 0.5;
@@ -85,7 +85,8 @@ pub fn update_transform_res(
     transform: Query<&GlobalTransform, (With<PlayerCam>, Without<PlayerBody>)>,
     mut terrain_material: ResMut<Assets<TerrainMaterial>>,
 ) {
-    let mut old = transform.single().translation();
+    let mut old = (transform.single().translation().clone() / LATTICE_GRID_SIZE as f32)/*.floor()*/
+        * LATTICE_GRID_SIZE as f32;
     // old.x = old.x.round();
     // old.z = old.z.round();
     let new_transform = GlobalTransform::from_xyz(old.x, 0., old.z);
@@ -380,39 +381,39 @@ pub fn stream_terrain_mesh(
             .vertices
             .values_mut()
             .append(&mut update.vertices.clone());
-        
+
         terrain_material_data_holder.triangles.clear();
         terrain_material_data_holder
             .triangles
             .values_mut()
             .append(&mut update.triangles.clone());
-        
+
         terrain_material_data_holder.halfedges.clear();
         terrain_material_data_holder
             .halfedges
             .values_mut()
             .append(&mut update.halfedges.clone());
-        
+
         terrain_material_data_holder.height.clear();
         terrain_material_data_holder
             .height
             .values_mut()
             .append(&mut update.heights.clone());
-        
+
         terrain_material_data_holder.gradients.clear();
         terrain_material_data_holder
             .gradients
             .values_mut()
             .append(&mut update.gradients.clone());
-        
+
         terrain_material_data_holder.triangle_indices.clear();
         terrain_material_data_holder
             .triangle_indices
             .values_mut()
             .append(&mut update.guesses.clone());
-        
+
         terrain_material_data_holder.write_buffer(&*render_device, &*render_queue);
-        
+
         let (handle, material) = terrain_material.iter_mut().next().unwrap();
         material.triangles = terrain_material_data_holder
             .triangles

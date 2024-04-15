@@ -34,8 +34,8 @@ pub trait Maze<N: NodeTrait> {
     fn adjacent(&self, center: N) -> Vec<N>;
 }
 
-pub trait CompressedMaze {
-    fn compressed(&self) -> BitVec<u32>;
+pub trait MazeBitRep {
+    fn bit_rep(&self) -> BitVec<u32>;
 }
 
 
