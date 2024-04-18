@@ -42,7 +42,7 @@ pub const CURVATURE_MESH_VERTEX_OUTPUT: Handle<Shader> = Handle::weak_from_u128(
 
 pub const UTIL: Handle<Shader> = Handle::weak_from_u128(128742342344982);
 
-pub const MAX_VERTICES: usize = 200000;
+pub const MAX_VERTICES: usize = TERRAIN_VERTICES * 2;
 pub const MAX_TRIANGLES: usize = 2 * MAX_VERTICES - 5;
 
 #[derive(Resource)]

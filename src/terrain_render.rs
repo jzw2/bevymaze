@@ -31,17 +31,17 @@ pub const TILE_WORLD_SIZE: f32 = TILE_SIZE as f32;
 type TileOffset = TilePosition;
 
 /// Number of chunks in each dir
-pub const X_VIEW_DISTANCE: i64 = 30;
+pub const X_VIEW_DISTANCE: i64 = 20;
 pub const Z_VIEW_DISTANCE: i64 = 250;
 /// Number of meters in each dir
 pub const X_VIEW_DIST_M: f64 = X_VIEW_DISTANCE as f64 * TILE_SIZE;
 pub const Z_VIEW_DIST_M: f64 = Z_VIEW_DISTANCE as f64 * TILE_SIZE;
 /// Number of vertices of our mesh
-pub const TERRAIN_VERTICES: i64 = 90000;
+pub const TERRAIN_VERTICES: usize = 80000;
 
 pub const PROB_TIGHTNESS: f64 = 100.0;
 
-pub const SCALE: f64 = 0.15;
+pub const SCALE: f64 = 0.09;
 pub const TEXTURE_SCALE: f64 = 0.0001;
 
 pub const LATTICE_GRID_SIZE: f64 = 0.5;

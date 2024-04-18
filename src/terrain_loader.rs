@@ -463,7 +463,7 @@ pub struct TerrainDataHolder {
     data: Vec<TerrainDataPoint>,
     /// The locator lets us find which point in the terrain data we are closest to quickly
     /// This also includes unresolved data
-    locator: KdTree<f32, u64, 2, 128, u32>,
+    locator: KdTree<f32, u64, 2, 256, u32>,
     /// This is the list of eviction candidates from best to worst
     /// It is sorted by the candidates' ratio of actual distance to ideal distance
     eviction_priority: Vec<(usize, f32)>,
@@ -474,7 +474,7 @@ pub struct TerrainMeshHolder {
     /// An unordered list of vertices in the mesh
     terrain_mesh_verts: Vec<[f32; 2]>,
     /// The reverse locator lets us find which point in the terrain MESH we are closest to quickly
-    reverse_locator: KdTree<f32, u64, 2, 128, u32>,
+    reverse_locator: KdTree<f32, u64, 2, 256, u32>,
     /// Center of the terrain mesh
     center: Vec2,
     /// The radius of acceptance for each vertex in terrain_mesh_verts
@@ -554,7 +554,7 @@ impl TerrainDataMap {
             resolved_data: holder.clone(),
             unresolved_data: holder,
             mesh: TerrainMeshHolder {
-                reverse_locator: KdTree::<f32, u64, 2, 128, u32>::from(&lattice_data),
+                reverse_locator: KdTree::<f32, u64, 2, 256, u32>::from(&lattice_data),
                 terrain_mesh_verts: lattice_data,
                 center: Vec2::ZERO,
                 check_radii,
@@ -658,7 +658,7 @@ fn fill_in_when_full_test() {
     let mut rng = StdRng::seed_from_u64(1);
     const MESH_VERTS: usize = 80;
     const TERRAIN_VERTS: usize = MESH_VERTS * 5 / 2;
-    let lattice = create_base_lattice_with_verts(MESH_VERTS as f64);
+    let lattice = create_base_lattice_with_verts(MESH_VERTS as f64, 10000.);
     let mesh_verts = lattice.len();
     let mut map = TerrainDataMap::new_with_capacity(&lattice, TERRAIN_VERTS);
     // completely fill up the map

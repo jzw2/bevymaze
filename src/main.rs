@@ -1,7 +1,7 @@
 //! Maze game
 
 // use std::collections::HashMap;
-use bevy::core_pipeline::bloom::{BloomCompositeMode, BloomSettings};
+use bevy::core_pipeline::bloom::{BloomCompositeMode, BloomPrefilterSettings, BloomSettings};
 use bevy::prelude::Color;
 use bevy::window::WindowResolution;
 use std::f32::consts::PI;
@@ -70,7 +70,7 @@ use futures_util::{FutureExt, Stream, StreamExt};
 use rand::Rng;
 use server::connection::*;
 use server::terrain_gen::{TerrainGenerator, FOOTHILL_START, MAX_HEIGHT, TILE_SIZE};
-use server::util::{cart_to_polar, lin_map};
+use server::util::{cart_to_polar, lin_map, lin_map32};
 use wasm_bindgen::prelude::wasm_bindgen;
 
 mod fabian;
@@ -176,6 +176,16 @@ fn add_lighting(mut commands: Commands /*mut wireframe_config: ResMut<WireframeC
         color: Color::WHITE,
         brightness: 2.0,
     });
+}
+
+fn maze_layer_height_func(layer: u32, layer_count: u32) -> f32 {
+    let pos = lin_map32(0., layer_count as f32, 0.0, 1.0, layer as f32);
+    fn F(p: f32) -> f32 {
+        let bias = 0.0;
+        ((2. * p - 1.) / 2.).atan() + p*bias + 0.5f32.atan()
+    }
+    let h = 2.0;
+    h * F(pos) / F(1.)
 }
 
 fn create_terrain(
@@ -296,7 +306,7 @@ fn create_terrain(
         .write_buffer(&*render_device, &*render_queue);
 
     let base_material = TerrainMaterial {
-        max_height: MAX_HEIGHT as f32,
+        max_height: MAX_HEIGHT as f32 / 2.0,
         grass_line: 0.15,
         tree_line: 0.5,
         snow_line: 0.75,
@@ -351,7 +361,7 @@ fn create_terrain(
     commands
         .spawn((
             ControllerBundle {
-                transform: Transform::from_xyz(0., 200., 0.),
+                transform: Transform::from_xyz(0., 300., 0.),
                 physics: ControllerPhysicsBundle { ..default() },
                 ..default()
             },
@@ -371,7 +381,7 @@ fn create_terrain(
                             far: 400.0 * 1000.0,
                         }),
                         camera: Camera {
-                            hdr: true,
+                            hdr: false,
                             ..default()
                         },
                         ..default()
@@ -387,7 +397,17 @@ fn create_terrain(
                             Color::rgba(0., 0.8, 1.0, 1.0), // atmospheric inscattering color (light gained due to scattering from the sun)
                         ),
                     },
-                    BloomSettings { ..default() },
+                    BloomSettings {
+                        intensity: 0.5,
+                        low_frequency_boost: 0.0,
+                        low_frequency_boost_curvature: 0.0,
+                        high_pass_frequency: 1.0 / 3.0,
+                        prefilter_settings: BloomPrefilterSettings {
+                            threshold: 0.0,
+                            threshold_softness: 0.0,
+                        },
+                        composite_mode: BloomCompositeMode::EnergyConserving,
+                    },
                     PlayerCam,
                 ))
                 .with_children(|commands| {
@@ -415,8 +435,9 @@ fn create_terrain(
         .raw_maze_data
         .write_buffer(&*render_device, &*render_queue);
 
-    const LAYER_COUNT: u32 = 32;
-    for layer in 0..LAYER_COUNT {
+    let buf = maze_data_holder.raw_maze_data.buffer().unwrap().clone();
+    const LAYER_COUNT: u32 = 24;
+    for layer in 0..LAYER_COUNT + 1 {
         let maze_layer_mesh = create_terrain_mesh(Some(create_base_lattice_with_verts(
             TERRAIN_VERTICES as f64,
             lin_map(
@@ -427,6 +448,9 @@ fn create_terrain(
                 layer as f64,
             ),
         )));
+        
+        let height = maze_layer_height_func(layer, LAYER_COUNT);
+        println!("height {height}");
         commands.spawn((
             MaterialMeshBundle {
                 mesh: meshes.add(maze_layer_mesh),
@@ -434,7 +458,7 @@ fn create_terrain(
                 material: maze_materials.add(ExtendedMaterial {
                     base: base_material.clone(),
                     extension: MazeLayerMaterial {
-                        layer_height: 2.0 * layer as f32 / (LAYER_COUNT as f32 - 1.0),
+                        layer_height: height,
                         data: maze_data_holder.raw_maze_data.buffer().unwrap().clone(),
                         maze_top_left: Vec2::ZERO,
                     },
@@ -604,7 +628,7 @@ fn main() {
     app.add_systems(Startup, setup_fps_counter);
     app.add_systems(Update, (fps_text_update_system, fps_counter_showhide));
 
-    app.add_systems(Update, update_colors);
+    // app.add_systems(Update, update_colors);
 
     app.run();
 }

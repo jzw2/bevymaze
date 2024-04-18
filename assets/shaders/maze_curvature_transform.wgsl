@@ -2,7 +2,7 @@
 #import bevy_pbr::mesh_bindings       mesh
 #import bevy_pbr::mesh_view_bindings
 //#import bevy_pbr::mesh_vertex_output  MeshVertexOutput
-#import bevymaze::util::{lin_map, hash11}
+#import bevymaze::util::{lin_map, hash11, murmurHash11}
 #import bevymaze::curvature_mesh_vertex_output  CuravtureMeshVertexOutput
 
 #import bevy_pbr::mesh_functions
@@ -167,10 +167,12 @@ fn vertex(vertex_no_morph: Vertex) -> CuravtureMeshVertexOutput {
         let c = vec2<f32>(vertices[ci], vertices[ci + 1u]);
         let bary = barycentric(out.world_position.xz, a, b, c);
         let height_hash = hash11(layer_height);
-        let perturbance = sin(3.0 * height_hash * out.world_position.xz);
+        let height_hash2 = hash11(layer_height + 1.0);
+        let height_hash3 = hash11(layer_height + 2.0);
+        let perturbance = sin(4.0 * (height_hash * out.world_position.xz + 2.0) + vec2<f32>(height_hash2, height_hash3));
         out.world_position.y = interp(ai / 2u, bi / 2u, ci / 2u, bary.xy)
             + layer_height
-            + 0.3 * perturbance.x * perturbance.y;
+            + 0.35 * (perturbance.x + perturbance.y) / 2.0;
     } else {
         out.world_position.y = 0.0;
     }

@@ -14,9 +14,9 @@ pub const VIEW_RADIUS: i64 = 100;
 /// Constants explicity related to the shape of the terrain
 const HEIGHT_SCALING: f64 = 1.;
 const MOUNTAIN_HEIGHT_OFFSET: f64 = 128. * 10.;
-const MOUNTAIN_MASSIVE_AMP: f64 = 100.;
-const MOUNTAIN_BIG_AMP: f64 = 90. * 10.;
-const MOUNTAIN_SMALL_AMP: f64 = 5. * 10.;
+const MOUNTAIN_MASSIVE_AMP: f64 = 2000.;
+const MOUNTAIN_BIG_AMP: f64 = 2000.;
+const MOUNTAIN_SMALL_AMP: f64 = 500.;
 const MOUNTAIN_MICRO_AMP: f64 = 20.;
 pub const MAX_HEIGHT: f64 = HEIGHT_SCALING
     * (MOUNTAIN_HEIGHT_OFFSET
@@ -53,13 +53,24 @@ impl TerrainGenerator {
         }
     }
 
+    fn mountain_noise_generator_gradient(&self, generator: usize, coords: [f64; 2]) -> DVec2 {
+        let [x, y] = coords;
+        let val = self.mountain_noise_generators[generator].sample(coords);
+
+        let dx = self.mountain_noise_generators[generator].sample([x + D, y]) - val;
+
+        let dy = self.mountain_noise_generators[generator].sample([x, y + D]) - val;
+
+        return DVec2::new(dx / D, dy / D);
+    }
+
     fn get_mountain_height_for(&self, x: f64, y: f64) -> f64 {
         let scale = 0.025f64;
         let x = x * scale;
         let z = y * scale;
 
-        let freq0 = 0.001f64;
-        let freq1 = 0.02f64;
+        let freq0 = 0.00001f64;
+        let freq1 = 0.002f64;
         let freq2 = 12.0 * freq1;
         let freq3 = freq2;
 
@@ -68,12 +79,22 @@ impl TerrainGenerator {
         let amp2 = MOUNTAIN_SMALL_AMP;
         let amp3 = MOUNTAIN_MICRO_AMP;
 
-        return self.mountain_noise_generators[0].sample([x * freq0, z * freq0]) * amp0 / 2.
-            + self.mountain_noise_generators[1].sample([x * freq1, z * freq1]) * amp1 / 2.
-            + self.mountain_noise_generators[2].sample([x * freq2, z * freq2]) * amp2 / 2.
-            + self.mountain_noise_generators[3].sample([x * freq3, z * freq3]) * amp3 / 2.
-            + (amp1 + amp2 + amp3) / 2.
-            + MOUNTAIN_HEIGHT_OFFSET;
+        let mut out = 0.;
+
+        for (i, freq, amp) in [
+            (1, freq0, amp0),
+            (2, freq1, amp1),
+            (3, freq2, amp2),
+            (4, freq3, amp3),
+        ] {
+            let samp = (self.mountain_noise_generators[i-1].sample([x * freq, z * freq])/* + 1.0*/)/* / 2.0*/;
+            let grad = self.mountain_noise_generator_gradient(i-1, [x * freq, y * freq]);
+            let mult = 0.02;
+            let influence = 1. / (/*i as f64 * */mult * grad.length() + 1.);
+            out += amp * influence * samp;
+        }
+
+        return out + (amp0 + amp1 + amp2 + amp3) / 4. + MOUNTAIN_HEIGHT_OFFSET;
     }
 
     fn get_valley_height_for(&self, x: f64, y: f64) -> f64 {

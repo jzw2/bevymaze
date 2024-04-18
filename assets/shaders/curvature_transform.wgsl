@@ -243,9 +243,9 @@ fn vertex(vertex_no_morph: Vertex) -> CuravtureMeshVertexOutput {
         let c = vec2<f32>(vertices[ci], vertices[ci + 1u]);
         let bary = barycentric(out.world_position.xz, a, b, c);
         out.world_position.y = interp(ai / 2u, bi / 2u, ci / 2u, found / 3u, bary.xy);
-//        if out.world_position.y > 3000.0 {
-//            out.world_position.y = 0.0;
-//        }
+        if out.world_position.y > 10000.0 {
+            out.world_position.y = 0.0;
+        }
     } else {
         out.world_position.y = 0.0;
     }
