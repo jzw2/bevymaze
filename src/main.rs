@@ -37,15 +37,9 @@ use bevy::reflect::DynamicTypePath;
 // use bevy::render::settings::RenderCreation::Automatic;
 // use bevy::render::settings::WgpuSettings;
 use crate::maze_loader::MazeCellDataState::Invalid;
-use crate::maze_loader::{
-    setup_maze_loader, stream_maze_mesh, MazeDataHolder, MAZE_CELLS_X, MAZE_CELLS_Y,
-    MAZE_DATA_COUNT,
-};
+use crate::maze_loader::{setup_maze_loader, stream_maze_mesh, MazeDataHolder, MAZE_CELLS_X, MAZE_CELLS_Y, MAZE_DATA_COUNT, MazeUpdateProcHandle};
 use crate::maze_render::GetWall;
-use crate::terrain_loader::{
-    setup_terrain_loader, setup_transform_res, stream_terrain_mesh, update_transform_res,
-    MainTerrainColldier, TerrainDataMap, TerrainTransformMaterialRes,
-};
+use crate::terrain_loader::{setup_terrain_loader, setup_transform_res, stream_terrain_mesh, update_transform_res, MainTerrainColldier, TerrainDataMap, TerrainTransformMaterialRes, TerrainUpdateProcHandle};
 use crate::ui::*;
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::pbr::wireframe::{WireframeColor, WireframeConfig, WireframePlugin};
@@ -470,7 +464,7 @@ fn create_terrain(
         },
         MainTerrain,
     ));
-    
+
     // const GRASS_LAYER_COUNT: u32 = 2;
     // for layer in 1..GRASS_LAYER_COUNT + 1 {
     //     let grass_layer_mesh = create_terrain_mesh(
@@ -478,7 +472,7 @@ fn create_terrain(
     //         &terrain_verts,
     //         lin_map(0., GRASS_LAYER_COUNT as f64, 20., 10000., layer as f64),
     //     );
-    // 
+    //
     //     let height = lin_map32(0., GRASS_LAYER_COUNT as f32, 0., 0.1, layer as f32);
     //     println!("height {height}");
     //     commands.spawn((
@@ -555,6 +549,11 @@ Color: {:?}
             };
         }
     }
+}
+
+pub fn exit_system(terrain_update_proc_handle: ResMut<TerrainUpdateProcHandle>, maze_update_proc_handle: ResMut<MazeUpdateProcHandle>) {
+    terrain_update_proc_handle.0.abort();
+    maze_update_proc_handle.0.abort();
 }
 
 #[wasm_bindgen]

@@ -12,6 +12,7 @@ use futures_lite::StreamExt;
 use futures_util::SinkExt;
 use image::{ImageBuffer, Rgb, RgbImage};
 use postcard::{from_bytes, to_stdvec};
+use tokio::task::JoinHandle;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message::Binary;
 use url::Url;
@@ -31,6 +32,9 @@ pub struct MazeDataUpdate {
 #[derive(Resource, Deref)]
 pub struct MazeUpdateReceiver(Receiver<MazeDataUpdate>);
 
+#[derive(Resource)]
+pub struct MazeUpdateProcHandle(pub JoinHandle<()>);
+
 pub fn setup_maze_loader(
     mut commands: Commands,
     runtime: ResMut<TokioTasksRuntime>,
@@ -47,87 +51,92 @@ pub fn setup_maze_loader(
     // we just use this once, and it lives ~forever~ (spooky)
     let mut holder = maze_data_holder.clone();
     // let mesh_verts = terrain_data_map.mesh.terrain_mesh_verts.clone();
-    runtime.spawn_background_task(|_ctx| async move {
-        // now fetch from the server!
-        let (mut socket, other) =
-            connect_async(Url::parse("ws://127.0.0.1:9002").expect("Can't connect to URL"))
-                .await
-                .unwrap();
+    commands.insert_resource::<MazeUpdateProcHandle>(MazeUpdateProcHandle(
+        runtime.spawn_background_task(|_ctx| async move {
+            // now fetch from the server!
+            let (mut socket, other) =
+                connect_async(Url::parse("ws://127.0.0.1:9002").expect("Can't connect to URL"))
+                    .await
+                    .unwrap();
 
-        loop {
-            // update the center
-            {
-                let t = transform.lock().unwrap();
-                // TODO: update center of maze holder
-                holder.top_left = [-(MAZE_CELLS_X as i32) / 2, -(MAZE_CELLS_Y as i32) / 2]
-                // holder.mesh.center = t.translation().xz();
-                // println!("Trans {:?}", map.center);
-            }
+            loop {
+                // update the center
+                {
+                    let t = transform.lock().unwrap();
+                    // TODO: update center of maze holder
+                    holder.top_left = [-(MAZE_CELLS_X as i32) / 2, -(MAZE_CELLS_Y as i32) / 2]
+                    // holder.mesh.center = t.translation().xz();
+                    // println!("Trans {:?}", map.center);
+                }
 
-            let batch_size = 1024; //512 / size_of::<TerrainDataPoint>();
-            let mut to_fetch = Vec::<[i32; 2]>::with_capacity(batch_size);
-            let mut total = 0;
+                let batch_size = 1024; //512 / size_of::<TerrainDataPoint>();
+                let mut to_fetch = Vec::<[i32; 2]>::with_capacity(batch_size);
+                let mut total = 0;
 
-            let [left, top] = holder.top_left;
-            for i in 0..MAZE_CELLS_X {
-                for j in 0..MAZE_CELLS_Y {
-                    match holder.data_states[i][j] {
-                        Invalid => {
-                            to_fetch.push([i as i32 + left, j as i32 + top]);
-                            holder.data_states[i][j] = Loading;
+                let [left, top] = holder.top_left;
+                for i in 0..MAZE_CELLS_X {
+                    for j in 0..MAZE_CELLS_Y {
+                        match holder.data_states[i][j] {
+                            Invalid => {
+                                to_fetch.push([i as i32 + left, j as i32 + top]);
+                                holder.data_states[i][j] = Loading;
+                            }
+                            _ => {}
                         }
-                        _ => {}
-                    }
 
-                    // send off a load and mark requested
-                    // we do this so the server can start fetching data for us
-                    if to_fetch.len() >= batch_size
-                        || (i == MAZE_CELLS_X - 1 && j == MAZE_CELLS_Y - 1 && to_fetch.len() > 0)
-                    {
-                        total += to_fetch.len();
-                        socket
-                            .send(Binary(
-                                to_stdvec(&MazeNetworkRequest::ReqMaze(to_fetch.clone())).unwrap(),
-                            ))
-                            .await
-                            .expect("TODO: panic message");
-                        // now clear and restart
-                        to_fetch.clear();
+                        // send off a load and mark requested
+                        // we do this so the server can start fetching data for us
+                        if to_fetch.len() >= batch_size
+                            || (i == MAZE_CELLS_X - 1
+                                && j == MAZE_CELLS_Y - 1
+                                && to_fetch.len() > 0)
+                        {
+                            total += to_fetch.len();
+                            socket
+                                .send(Binary(
+                                    to_stdvec(&MazeNetworkRequest::ReqMaze(to_fetch.clone()))
+                                        .unwrap(),
+                                ))
+                                .await
+                                .expect("TODO: panic message");
+                            // now clear and restart
+                            to_fetch.clear();
+                        }
                     }
                 }
-            }
 
-            if total == 0 {
-                continue;
-            }
+                if total == 0 {
+                    continue;
+                }
 
-            while total > 0 {
-                match socket.next().await.unwrap() {
-                    Ok(msg) => {
-                        if let Binary(bin) = msg {
-                            let fetched = from_bytes::<MazeNetworkResponse>(&bin).unwrap();
-                            if let MazeNetworkResponse::Maze(fetched) = fetched {
-                                for cell in &fetched {
-                                    // println!("Importing {:?} with data [{}{}{}{}{}{}...]", cell.cell, cell.data[0], cell.data[1], cell.data[2], cell.data[3], cell.data[4], cell.data[5]);
-                                    holder.import(cell);
+                while total > 0 {
+                    match socket.next().await.unwrap() {
+                        Ok(msg) => {
+                            if let Binary(bin) = msg {
+                                let fetched = from_bytes::<MazeNetworkResponse>(&bin).unwrap();
+                                if let MazeNetworkResponse::Maze(fetched) = fetched {
+                                    for cell in &fetched {
+                                        // println!("Importing {:?} with data [{}{}{}{}{}{}...]", cell.cell, cell.data[0], cell.data[1], cell.data[2], cell.data[3], cell.data[4], cell.data[5]);
+                                        holder.import(cell);
+                                    }
+                                    total -= fetched.len();
                                 }
-                                total -= fetched.len();
                             }
                         }
-                    }
-                    Err(_) => {
-                        // do nothing
+                        Err(_) => {
+                            // do nothing
+                        }
                     }
                 }
-            }
 
-            tx.send(MazeDataUpdate {
-                data: holder.data.clone(),
-                maze_top_left: Vec2::new(holder.top_left[0] as f32, holder.top_left[1] as f32),
-            })
-            .unwrap();
-        }
-    });
+                tx.send(MazeDataUpdate {
+                    data: holder.data.clone(),
+                    maze_top_left: Vec2::new(holder.top_left[0] as f32, holder.top_left[1] as f32),
+                })
+                .unwrap();
+            }
+        }),
+    ));
     // tokio::spawn();
 
     commands.insert_resource(MazeUpdateReceiver(rx));

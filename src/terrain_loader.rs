@@ -36,6 +36,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::net::TcpStream;
+use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::Error;
 use tokio_tungstenite::tungstenite::Message::Binary;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
@@ -67,6 +68,9 @@ pub struct MeshOffsetRes(pub Arc<Mutex<GlobalTransform>>);
 
 #[derive(Resource)]
 pub struct TerrainTransformMaterialRes(pub Handle<TerrainMaterial>);
+
+#[derive(Resource)]
+pub struct TerrainUpdateProcHandle(pub JoinHandle<()>);
 
 pub fn setup_transform_res(
     mut commands: Commands,
@@ -107,8 +111,8 @@ pub fn setup_terrain_loader(
     terrain_data_map: Res<TerrainDataMap>,
     mut terrain_material: ResMut<Assets<TerrainMaterial>>,
     mut terrain_material_data_holder: ResMut<TerrainMaterialDataHolder>,
-    mut render_device: ResMut<RenderDevice>,
-    mut render_queue: ResMut<RenderQueue>,
+    render_device: ResMut<RenderDevice>,
+    render_queue: ResMut<RenderQueue>,
 ) {
     let (handle, material) = terrain_material.iter_mut().next().unwrap();
     // setup the shader verts!
@@ -137,168 +141,169 @@ pub fn setup_terrain_loader(
     // we just use this once, and it lives ~forever~ (spooky)
     let mut map = terrain_data_map.clone();
     let mesh_verts = terrain_data_map.mesh.terrain_mesh_verts.clone();
-    runtime.spawn_background_task(|_ctx| async move {
-        // now fetch from the server!
-        let (mut socket, other) =
-            connect_async(Url::parse("ws://127.0.0.1:9002").expect("Can't connect to URL"))
-                .await
-                .unwrap();
-
-        loop {
-            // update the center
-            {
-                let t = transform.lock().unwrap();
-                map.mesh.center = t.translation().xz();
-                // println!("Trans {:?}", map.center);
-            }
-
-            let batch_size = 1024; //512 / size_of::<TerrainDataPoint>();
-            let mut to_fetch = Vec::<TerrainDataPoint>::with_capacity(batch_size);
-            let mut total = 0;
-            for i in 0..mesh_verts.len() {
-                // now we check the data map
-                if let Some(vert) = map.vert_to_fetch(i) {
-                    to_fetch.push(TerrainDataPoint {
-                        coordinates: vert,
-                        height: 0.,
-                        idx: 0,
-                        gradient: [0., 0.],
-                    });
-                }
-
-                // send off a load and mark requested
-                // we do this so the server can start fetching data for us
-                if to_fetch.len() >= batch_size || (i == mesh_verts.len() - 1 && to_fetch.len() > 0)
+    commands.insert_resource::<TerrainUpdateProcHandle>(TerrainUpdateProcHandle(
+        runtime.spawn_background_task(|_ctx| async move {
+            // now fetch from the server!
+            let (mut socket, other) =
+                connect_async(Url::parse("ws://127.0.0.1:9002").expect("Can't connect to URL"))
+                    .await
+                    .unwrap();
+            loop {
+                // update the center
                 {
-                    total += to_fetch.len();
-                    // println!("Sending req for {}", to_fetch.len());
-                    map.mark_requested(&mut to_fetch);
-                    socket
-                        .send(Binary(
-                            to_stdvec(&MazeNetworkRequest::ReqTerrainHeights(to_fetch.clone()))
-                                .unwrap(),
-                        ))
-                        .await
-                        .expect("TODO: panic message");
-                    // now clear and restart
-                    to_fetch.clear();
+                    let t = transform.lock().unwrap();
+                    map.mesh.center = t.translation().xz();
+                    // println!("Trans {:?}", map.center);
                 }
-            }
 
-            if total == 0 {
-                continue;
-            }
-
-            while total > 0 {
-                match socket.next().await.unwrap() {
-                    Ok(msg) => {
-                        if let Binary(bin) = msg {
-                            let fetched = from_bytes::<MazeNetworkResponse>(&bin).unwrap();
-                            if let TerrainHeights(fetched) = fetched {
-                                map.fill_in_data(&fetched);
-                                println!(
-                                    "Filled in {}, remaining {}",
-                                    fetched.len(),
-                                    total - fetched.len()
-                                );
-                                total -= fetched.len();
-                            }
-                        }
+                let batch_size = 1024; //512 / size_of::<TerrainDataPoint>();
+                let mut to_fetch = Vec::<TerrainDataPoint>::with_capacity(batch_size);
+                let mut total = 0;
+                for i in 0..mesh_verts.len() {
+                    // now we check the data map
+                    if let Some(vert) = map.vert_to_fetch(i) {
+                        to_fetch.push(TerrainDataPoint {
+                            coordinates: vert,
+                            height: 0.,
+                            idx: 0,
+                            gradient: [0., 0.],
+                        });
                     }
-                    Err(_) => {
-                        // do nothing
+
+                    // send off a load and mark requested
+                    // we do this so the server can start fetching data for us
+                    if to_fetch.len() >= batch_size
+                        || (i == mesh_verts.len() - 1 && to_fetch.len() > 0)
+                    {
+                        total += to_fetch.len();
+                        // println!("Sending req for {}", to_fetch.len());
+                        map.mark_requested(&mut to_fetch);
+                        socket
+                            .send(Binary(
+                                to_stdvec(&MazeNetworkRequest::ReqTerrainHeights(to_fetch.clone()))
+                                    .unwrap(),
+                            ))
+                            .await
+                            .expect("TODO: panic message");
+                        // now clear and restart
+                        to_fetch.clear();
                     }
                 }
-            }
 
-            // finally update!
-
-            // send a signal to update our shader once we've received everything we requested
-            let mut delaunay_points: Vec<Point> = Vec::with_capacity(MAX_VERTICES);
-            let mut raw: Vec<f32> = Vec::with_capacity(MAX_VERTICES * 2);
-            let mut heights: Vec<f32> = Vec::with_capacity(MAX_VERTICES);
-            let mut gradients: Vec<f32> = Vec::with_capacity(MAX_VERTICES * 2);
-            let mut guesses = vec![0u32; mesh_verts.len()];
-
-            let mut verts = Vec::<[f32; 2]>::with_capacity(mesh_verts.len());
-
-            for datum in &map.resolved_data.data {
-                // generate a random position in a circle
-                let [x, z] = datum.coordinates;
-
-                if x.is_infinite() || z.is_infinite() {
-                    // ignore unresolved data
+                if total == 0 {
                     continue;
                 }
 
-                let y = datum.height;
-                delaunay_points.push(Point {
-                    x: x as f64,
-                    y: z as f64,
-                });
-                heights.push(y);
-                raw.push(x);
-                raw.push(z);
-                gradients.push(datum.gradient[0]);
-                gradients.push(datum.gradient[1]);
-                verts.push([x, z]);
-            }
-
-            let triangulation = triangulate(&delaunay_points);
-
-            for (i, vtx) in map.mesh.terrain_mesh_verts.iter_mut().enumerate() {
-                let mut vtx = *vtx;
-                vtx[0] += map.mesh.center.x;
-                vtx[1] += map.mesh.center.y;
-                let prev = {
-                    if i < 1 {
-                        0
-                    } else {
-                        guesses[i - 1]
+                while total > 0 {
+                    match socket.next().await.unwrap() {
+                        Ok(msg) => {
+                            if let Binary(bin) = msg {
+                                let fetched = from_bytes::<MazeNetworkResponse>(&bin).unwrap();
+                                if let TerrainHeights(fetched) = fetched {
+                                    map.fill_in_data(&fetched);
+                                    println!(
+                                        "Filled in {}, remaining {}",
+                                        fetched.len(),
+                                        total - fetched.len()
+                                    );
+                                    total -= fetched.len();
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            // do nothing
+                        }
                     }
-                };
-                guesses[i] =
-                    find_triangle(&verts, &triangulation, &vtx, prev as usize, usize::MAX) as u32;
+                }
+
+                // finally update!
+
+                // send a signal to update our shader once we've received everything we requested
+                let mut delaunay_points: Vec<Point> = Vec::with_capacity(MAX_VERTICES);
+                let mut raw: Vec<f32> = Vec::with_capacity(MAX_VERTICES * 2);
+                let mut heights: Vec<f32> = Vec::with_capacity(MAX_VERTICES);
+                let mut gradients: Vec<f32> = Vec::with_capacity(MAX_VERTICES * 2);
+                let mut guesses = vec![0u32; mesh_verts.len()];
+
+                let mut verts = Vec::<[f32; 2]>::with_capacity(mesh_verts.len());
+
+                for datum in &map.resolved_data.data {
+                    // generate a random position in a circle
+                    let [x, z] = datum.coordinates;
+
+                    if x.is_infinite() || z.is_infinite() {
+                        // ignore unresolved data
+                        continue;
+                    }
+
+                    let y = datum.height;
+                    delaunay_points.push(Point {
+                        x: x as f64,
+                        y: z as f64,
+                    });
+                    heights.push(y);
+                    raw.push(x);
+                    raw.push(z);
+                    gradients.push(datum.gradient[0]);
+                    gradients.push(datum.gradient[1]);
+                    verts.push([x, z]);
+                }
+
+                let triangulation = triangulate(&delaunay_points);
+
+                for (i, vtx) in map.mesh.terrain_mesh_verts.iter_mut().enumerate() {
+                    let mut vtx = *vtx;
+                    vtx[0] += map.mesh.center.x;
+                    vtx[1] += map.mesh.center.y;
+                    let prev = {
+                        if i < 1 {
+                            0
+                        } else {
+                            guesses[i - 1]
+                        }
+                    };
+                    guesses[i] =
+                        find_triangle(&verts, &triangulation, &vtx, prev as usize, usize::MAX)
+                            as u32;
+                }
+
+                println!(
+                    "Sending data r {} | v {} t {} he {} h {} g {}",
+                    map.resolved_data.data.len(),
+                    raw.len(),
+                    triangulation.triangles.len(),
+                    triangulation.halfedges.len(),
+                    heights.len(),
+                    gradients.len()
+                );
+                tx.send(TerrainDataUpdate {
+                    center: map.mesh.center,
+                    collider: generate_terrain_collider(
+                        &map.mesh.center,
+                        &verts,
+                        &heights,
+                        &gradients,
+                        &triangulation,
+                    ),
+                    vertices: raw,
+                    triangles: triangulation
+                        .triangles
+                        .into_iter()
+                        .map(|e| e as u32)
+                        .collect(),
+                    halfedges: triangulation
+                        .halfedges
+                        .into_iter()
+                        .map(|e| e as u32)
+                        .collect(),
+                    heights,
+                    gradients,
+                    guesses,
+                })
+                .unwrap();
             }
-
-            println!(
-                "Sending data r {} | v {} t {} he {} h {} g {}",
-                map.resolved_data.data.len(),
-                raw.len(),
-                triangulation.triangles.len(),
-                triangulation.halfedges.len(),
-                heights.len(),
-                gradients.len()
-            );
-            tx.send(TerrainDataUpdate {
-                center: map.mesh.center,
-                collider: generate_terrain_collider(
-                    &map.mesh.center,
-                    &verts,
-                    &heights,
-                    &gradients,
-                    &triangulation,
-                ),
-                vertices: raw,
-                triangles: triangulation
-                    .triangles
-                    .into_iter()
-                    .map(|e| e as u32)
-                    .collect(),
-                halfedges: triangulation
-                    .halfedges
-                    .into_iter()
-                    .map(|e| e as u32)
-                    .collect(),
-                heights,
-                gradients,
-                guesses,
-            })
-            .unwrap();
-        }
-    });
-    // tokio::spawn();
-
+        }),
+    ));
     commands.insert_resource(TerrainUpdateReceiver(rx));
 }
 
