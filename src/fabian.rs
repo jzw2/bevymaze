@@ -1,4 +1,3 @@
-use std::ops::Range;
 use crate::terrain_render::{X_VIEW_DIST_M, Z_VIEW_DIST_M};
 use delaunator::{next_halfedge, prev_halfedge, triangulate, Point, Triangulation, EMPTY};
 use image::{Rgba, RgbaImage};
@@ -6,7 +5,8 @@ use imageproc::drawing::{draw_filled_circle_mut, draw_line_segment_mut, draw_tex
 use rand::prelude::StdRng;
 use rand::{Rng, SeedableRng};
 use rusttype::{Font, Scale};
-use server::util::{point_in_triangle_bary, lin_map, orientation, point_in_triangle, lin_map32};
+use server::util::{lin_map, lin_map32, orientation, point_in_triangle, point_in_triangle_bary};
+use std::ops::Range;
 use std::time::Instant;
 
 #[inline]
@@ -18,10 +18,9 @@ fn get_tri(triangles: &Vec<[usize; 3]>, vertices: &Vec<[f64; 2]>, idx: usize) ->
     ];
 }
 
-
 struct EdgeGuesser {
     domain: (Range<f32>, Range<f32>),
-    guesses: Vec<[usize; 256]>
+    guesses: Vec<[usize; 256]>,
 }
 
 impl EdgeGuesser {
@@ -29,7 +28,8 @@ impl EdgeGuesser {
     fn build(
         domain: (Range<f32>, Range<f32>),
         vertices: &Vec<[f32; 2]>,
-             triangulation: &Triangulation,) -> Self {
+        triangulation: &Triangulation,
+    ) -> Self {
         let mut guesses = vec![[0usize; 256]; 256];
         let mut last_guess = 0;
 
@@ -44,16 +44,13 @@ impl EdgeGuesser {
             last_guess = guess_row[0];
         }
 
-        return EdgeGuesser {
-            domain,
-            guesses
-        }
+        return EdgeGuesser { domain, guesses };
     }
 
     fn guess(&self, p: &[f32; 2]) -> usize {
         let [x, y] = p;
-        let xi = lin_map32(self.domain.0.start, self.domain.0.end,  0., 256., *x).round() as usize;
-        let yi = lin_map32( self.domain.1.start, self.domain.1.end, 0., 256., *y).round() as usize;
+        let xi = lin_map32(self.domain.0.start, self.domain.0.end, 0., 256., *x).round() as usize;
+        let yi = lin_map32(self.domain.1.start, self.domain.1.end, 0., 256., *y).round() as usize;
         let xi = xi.min(255).max(0);
         let yi = yi.min(255).max(0);
         return self.guesses[xi][yi] * 3;

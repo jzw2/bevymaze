@@ -85,7 +85,7 @@ pub fn update_transform_res(
     transform: Query<&GlobalTransform, (With<PlayerCam>, Without<PlayerBody>)>,
     mut terrain_material: ResMut<Assets<TerrainMaterial>>,
 ) {
-    let mut old = (transform.single().translation().clone() / LATTICE_GRID_SIZE as f32)/*.floor()*/
+    let mut old = (transform.single().translation().clone() / LATTICE_GRID_SIZE as f32)/*.round()*/
         * LATTICE_GRID_SIZE as f32;
     // old.x = old.x.round();
     // old.z = old.z.round();
@@ -521,14 +521,14 @@ impl TerrainMeshHolder {
 }
 
 impl TerrainDataMap {
-    pub fn new(terrain_lattice: &Vec<DVec3>) -> Self {
+    pub fn new(terrain_lattice: &Vec<DVec2>) -> Self {
         return TerrainDataMap::new_with_capacity(terrain_lattice, MAX_VERTICES);
     }
 
-    pub fn new_with_capacity(terrain_lattice: &Vec<DVec3>, capacity: usize) -> Self {
+    pub fn new_with_capacity(terrain_lattice: &Vec<DVec2>, capacity: usize) -> Self {
         let lattice_data: Vec<[f32; 2]> = terrain_lattice
             .into_iter()
-            .map(|e| e.xz().as_vec2().to_array())
+            .map(|e| e.as_vec2().to_array())
             .collect();
         let holder = TerrainDataHolder {
             data: vec![
@@ -547,7 +547,7 @@ impl TerrainDataMap {
         };
         let check_radii = terrain_lattice
             .into_iter()
-            .map(|e| (DATA_TOLERANCE * e.xz().length()) as f32)
+            .map(|e| (DATA_TOLERANCE * e.length()) as f32)
             .collect();
         return TerrainDataMap {
             initialized: false,
@@ -658,7 +658,7 @@ fn fill_in_when_full_test() {
     let mut rng = StdRng::seed_from_u64(1);
     const MESH_VERTS: usize = 80;
     const TERRAIN_VERTS: usize = MESH_VERTS * 5 / 2;
-    let lattice = create_base_lattice_with_verts(MESH_VERTS as f64, 10000.);
+    let lattice = create_base_lattice_with_verts(MESH_VERTS as f64);
     let mesh_verts = lattice.len();
     let mut map = TerrainDataMap::new_with_capacity(&lattice, TERRAIN_VERTS);
     // completely fill up the map

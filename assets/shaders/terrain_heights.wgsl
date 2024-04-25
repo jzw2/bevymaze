@@ -80,7 +80,7 @@ fn find_triangle(p: vec2<f32>, edge: u32) -> u32 {
 
     // we don't want to go more than 20 times
     // TODO: figure out why having a max of 100 is too much???
-    for (var i: i32 = 0; i < 25; i++) {
+    for (var i: i32 = 0; i < 20; i++) {
         let next: u32 = next_halfedge(current);
         let pc: u32 = 2u * triangles[current];
         let pn: u32 = 2u * triangles[next];

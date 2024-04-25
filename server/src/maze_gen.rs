@@ -38,7 +38,6 @@ pub trait MazeBitRep {
     fn bit_rep(&self) -> BitVec<u32>;
 }
 
-
 pub struct CircleMaze {
     pub maze: CircleMazeComponent,
 

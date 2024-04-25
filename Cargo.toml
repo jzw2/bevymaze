@@ -24,7 +24,7 @@ qoi = "0.4.1"
 lazy_static = "1.4.0"
 itertools = "0.11.0"
 #bevy_shader_utils = "0.5.2"
-delaunator = "1.0.2"
+delaunator = { git = "https://github.com/mourner/delaunator-rs" }
 roots = "0.0.8"
 bevy_rapier3d = "0.23.0"
 # bevy_mod_wanderlust = "0.4.0"

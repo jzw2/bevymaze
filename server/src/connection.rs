@@ -12,7 +12,7 @@ pub struct TerrainDataPointRequest {
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct MazeCell {
     pub cell: [i32; 2],
-    pub data: BitVec<u32>
+    pub data: BitVec<u32>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Copy)]
@@ -47,14 +47,13 @@ impl Default for TerrainDataPoint {
 pub enum MazeNetworkRequest {
     // TODO: switch to TerrainDataPointRequest
     ReqTerrainHeights(Vec<TerrainDataPoint>),
-    ReqMaze(Vec<[i32; 2]>)
+    ReqMaze(Vec<[i32; 2]>),
 }
-
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum MazeNetworkResponse {
     TerrainHeights(Vec<TerrainDataPoint>),
-    Maze(Vec<MazeCell>)
+    Maze(Vec<MazeCell>),
 }
 
 // Use a port of 0 to automatically select a port

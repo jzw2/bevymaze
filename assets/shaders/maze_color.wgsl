@@ -128,15 +128,14 @@ fn fragment(
     // Take this and map to the unnormalized position in ellipse space
     // Do the polar arsinh transform
     // Get the polar
-    var uv = in.uv;
-    let r = sqrt(uv[0]*uv[0] + uv[1]*uv[1]);
-    let theta = atan2(uv[1], uv[0]);
-    // arsinh the magnitude and revert back to cart
-    uv[0] = asinh(r*scale)/scale * cos(theta);
-    uv[1] = asinh(r*scale)/scale * sin(theta);
+    var uv = in.world_position.xz;
+    let length = length(uv);
+    let scale = (asinh(length * scale) / scale) / length;
+    uv *= scale;
+
     // Now do a linear transform to get to texture space
-    uv[0] = lin_map(-u_bound, u_bound, 0.0, 1.0, uv[0]);
-    uv[1] = lin_map(-v_bound, v_bound, 0.0, 1.0, uv[1]);
+    uv.x = lin_map(-u_bound, u_bound, 0.0, 1.0, uv.x);
+    uv.y = lin_map(-v_bound, v_bound, 0.0, 1.0, uv.y);
     // finally we can get the normal
     let n_vec4 = textureSample(normal_texture, normal_sampler, uv);
     // we have to remember that the normal is compressed!
@@ -152,7 +151,7 @@ fn fragment(
         discard;
     }
 
-    let leaf = floor(in.world_position.xz * 20.0f);
+    let leaf = floor(in.world_position.xz * 60.0f);
 
     if is_in_path(in.original_world_position.xz / 2.0) {
         discard;
@@ -164,14 +163,14 @@ fn fragment(
         let rand = hash12(leaf * layer_height);
         let norm_l_height = layer_height / 2.5f;
         if rand < 0.7 {
-            pbr.material.base_color = grass_color * norm_l_height;
+            pbr.material.base_color = grass_color * norm_l_height * 1.1;
         } else {
             discard;
         }
     }
 
-    pbr.material.perceptual_roughness = 0.98;
-    pbr.material.reflectance = 0.001;
+    pbr.material.perceptual_roughness = 0.90;
+    pbr.material.reflectance = 0.2;
     var output_color = pbr_functions::apply_pbr_lighting(pbr);
     output_color = pbr_functions::apply_fog(fog, output_color, in.world_position.xyz, view.world_position.xyz);
 

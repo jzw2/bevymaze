@@ -19,7 +19,7 @@
 
 //#import bevy_shader_utils::perlin_noise_2d perlin_noise_2d
 
-#import bevymaze::util lin_map
+#import bevymaze::util::{lin_map, hash12}
 
 #import bevy_pbr::{
     //forward_io::VertexOutput,
@@ -71,48 +71,49 @@ fn fragment(
     // Take this and map to the unnormalized position in ellipse space
     // Do the polar arsinh transform
     // Get the polar
-    var uv = in.uv;
-    let r = sqrt(uv[0]*uv[0] + uv[1]*uv[1]);
-    let theta = atan2(uv[1], uv[0]);
-    // arsinh the magnitude and revert back to cart
-    uv[0] = asinh(r*scale)/scale * cos(theta);
-    uv[1] = asinh(r*scale)/scale * sin(theta);
+    var uv = in.world_position.xz;
+    let length = length(uv);
+    let scale = (asinh(length * scale) / scale) / length;
+    uv *= scale;
+
     // Now do a linear transform to get to texture space
-    uv[0] = lin_map(-u_bound, u_bound, 0.0, 1.0, uv[0]);
-    uv[1] = lin_map(-v_bound, v_bound, 0.0, 1.0, uv[1]);
+    uv.x = lin_map(-u_bound, u_bound, 0.0, 1.0, uv.x);
+    uv.y = lin_map(-v_bound, v_bound, 0.0, 1.0, uv.y);
     // finally we can get the normal
     let n_vec4 = textureSample(normal_texture, normal_sampler, uv);
     // we have to remember that the normal is compressed!
-    let x = n_vec4[0];
-    let z = n_vec4[1];
+    let x = n_vec4.x;
+    let z = n_vec4.y;
     let normal = vec3<f32>(x, sqrt(1.0 - x*x - z*z), z);
-//    let normal = in.world_normal;
-//    pbr.world_normal = in.world_normal;
     pbr.world_normal = normal;
     pbr.N = pbr.world_normal;
     pbr.V = pbr_functions::calculate_view(in.world_position, false);
 
-    var cosine_angle = dot(in.world_normal, vec3(0.0, 1.0, 0.0));
+    var cosine_angle = dot(pbr.world_normal, vec3(0.0, 1.0, 0.0));
 
     var base_color = stone_color;
-    let pos_vector = vec2<f32>(in.original_world_position[0] * 0.001, in.original_world_position[2] * 0.001);
-    let height_frac = in.original_world_position[1] / max_height + 0.0; //0.08 * perlin_noise_2d(pos_vector);
+    let height_frac = in.original_world_position[1] / max_height;
 
     pbr.material.perceptual_roughness = 0.98;
-    pbr.material.reflectance = 0.001;
+    pbr.material.reflectance = 0.2;
 
     if (height_frac < grass_line) {
-        base_color = grass_color;
+        base_color = grass_color * 0.5;
     } else if (height_frac < tree_line) {
         if (cosine_angle > cosine_max_tree_slope) {
-            base_color = tree_color;
+            base_color = tree_color * 0.5;
         } else {
-            base_color = grass_color;
+            base_color = grass_color * 0.5;
         }
     } else if (height_frac > snow_line && cosine_angle > cosine_max_snow_slope) {
+        let flicker = floor(in.world_position.xz * 20.0f);
+        let rand = hash12(flicker);
         pbr.material.reflectance = 0.95;
-        pbr.material.perceptual_roughness = 0.2;
+//        pbr.material.perceptual_roughness = 0.01;
         base_color = snow_color;
+        if rand > 0.5 {
+            base_color -= 0.6 * vec4<f32>(1.0, 1.0, 1.0, 0.0);
+        }
     }
 
     pbr.material.base_color = base_color;

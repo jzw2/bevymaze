@@ -153,7 +153,9 @@ fn vertex(vertex_no_morph: Vertex) -> CuravtureMeshVertexOutput {
 
 #ifdef VERTEX_POSITIONS
 
+#ifdef VERTEX_UVS
     out.uv = vertex.uv;
+#endif
     out.world_position = bevy_pbr::mesh_functions::mesh_position_local_to_world(model, vec4<f32>(vertex.position, 1.0));
 
     let found = triangle_indices[vertex.vertex_index];
@@ -169,7 +171,7 @@ fn vertex(vertex_no_morph: Vertex) -> CuravtureMeshVertexOutput {
         let height_hash = hash11(layer_height);
         let height_hash2 = hash11(layer_height + 1.0);
         let height_hash3 = hash11(layer_height + 2.0);
-        let perturbance = sin(4.0 * (height_hash * out.world_position.xz + 2.0) + vec2<f32>(height_hash2, height_hash3));
+        let perturbance = sin(3.0 * (height_hash * out.world_position.xz + 2.0) + vec2<f32>(height_hash2, height_hash3));
         out.world_position.y = interp(ai / 2u, bi / 2u, ci / 2u, bary.xy)
             + layer_height
             + 0.35 * (perturbance.x + perturbance.y) / 2.0;
@@ -188,7 +190,7 @@ fn vertex(vertex_no_morph: Vertex) -> CuravtureMeshVertexOutput {
     /// where r_e is the radius of the earth and v is the vertex's world pos
     let view_world_pos = bevy_pbr::mesh_view_bindings::view.world_position.xyz;
     let rel_pos = out.world_position.xyz - view_world_pos;
-    let origin_dist: f32 = sqrt(rel_pos.x*rel_pos.x + rel_pos.z*rel_pos.z);
+    let origin_dist: f32 = length(rel_pos.xz);
     if origin_dist > 1000.0 {
         // only apply our transformation at large distances, because otherwise
         // rounding errors become noticable
@@ -199,7 +201,7 @@ fn vertex(vertex_no_morph: Vertex) -> CuravtureMeshVertexOutput {
         /// Now we rotate it to match the original
         /// (signed) angle of the original is phi = atan2(v_z, v_x * v_z)
         var phi: f32 = 0.0;
-        if (rel_pos[0] != 0.0) {
+        if (rel_pos.x != 0.0) {
             phi = -atan2(rel_pos.z, rel_pos.x);
         }
         let rotation_mat = mat3x3<f32>(cos(phi), 0.0, -sin(phi), 0.0, 1.0, 0.0, sin(phi), 0.0, cos(phi));

@@ -15,9 +15,9 @@ pub const VIEW_RADIUS: i64 = 100;
 const HEIGHT_SCALING: f64 = 1.;
 const MOUNTAIN_HEIGHT_OFFSET: f64 = 128. * 10.;
 const MOUNTAIN_MASSIVE_AMP: f64 = 2000.;
-const MOUNTAIN_BIG_AMP: f64 = 2000.;
+const MOUNTAIN_BIG_AMP: f64 = 1000.;
 const MOUNTAIN_SMALL_AMP: f64 = 500.;
-const MOUNTAIN_MICRO_AMP: f64 = 20.;
+const MOUNTAIN_MICRO_AMP: f64 = 100.;
 pub const MAX_HEIGHT: f64 = HEIGHT_SCALING
     * (MOUNTAIN_HEIGHT_OFFSET
         + MOUNTAIN_BIG_AMP
@@ -69,9 +69,9 @@ impl TerrainGenerator {
         let x = x * scale;
         let z = y * scale;
 
-        let freq0 = 0.00001f64;
+        let freq0 = 0.00003f64;
         let freq1 = 0.002f64;
-        let freq2 = 12.0 * freq1;
+        let freq2 = 12.0 * freq1 * 2.0;
         let freq3 = freq2;
 
         let amp0 = MOUNTAIN_MASSIVE_AMP;
@@ -88,8 +88,8 @@ impl TerrainGenerator {
             (4, freq3, amp3),
         ] {
             let samp = (self.mountain_noise_generators[i-1].sample([x * freq, z * freq])/* + 1.0*/)/* / 2.0*/;
-            let grad = self.mountain_noise_generator_gradient(i-1, [x * freq, y * freq]);
-            let mult = 0.02;
+            let grad = self.mountain_noise_generator_gradient(i - 1, [x * freq, z * freq]);
+            let mult = 0.1;
             let influence = 1. / (/*i as f64 * */mult * grad.length() + 1.);
             out += amp * influence * samp;
         }

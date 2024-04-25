@@ -16,15 +16,14 @@ use crate::player_controller::{
     PlayerCam,
 };
 use crate::shaders::{
-    MazeLayerMaterial, MazeLayerMaterialDataHolder, TerrainMaterial, TerrainMaterialDataHolder,
-    TerrainPlugin, MAX_TRIANGLES, MAX_VERTICES,
+    GrassLayerMaterial, MazeLayerMaterial, MazeLayerMaterialDataHolder, TerrainMaterial,
+    TerrainMaterialDataHolder, TerrainPlugin, MAX_TRIANGLES, MAX_VERTICES,
 };
 // use crate::terrain_loader::get_chunk;
 use crate::terrain_render::{
-    create_base_lattice, create_base_lattice_with_verts, create_lattice_plane,
-    create_terrain_height_map, create_terrain_mesh, create_terrain_normal_map, MainTerrain, SCALE,
-    TERRAIN_VERTICES, TEXTURE_SCALE, X_VIEW_DISTANCE, X_VIEW_DIST_M, Z_VIEW_DISTANCE,
-    Z_VIEW_DIST_M,
+    create_base_lattice, create_base_lattice_with_verts, create_lattice_plane, create_terrain_mesh,
+    create_terrain_normal_map, create_triangulation, MainTerrain, SCALE, TERRAIN_VERTICES,
+    TEXTURE_SCALE, X_VIEW_DISTANCE, X_VIEW_DIST_M, Z_VIEW_DISTANCE, Z_VIEW_DIST_M,
 };
 use bevy::log::LogPlugin;
 use bevy::math::{DVec2, Vec3};
@@ -158,7 +157,7 @@ fn add_lighting(mut commands: Commands /*mut wireframe_config: ResMut<WireframeC
     .build();
     commands.spawn(DirectionalLightBundle {
         directional_light: DirectionalLight {
-            illuminance: 100000.0,
+            illuminance: 95000.0,
             shadows_enabled: true,
             ..default()
         },
@@ -182,7 +181,7 @@ fn maze_layer_height_func(layer: u32, layer_count: u32) -> f32 {
     let pos = lin_map32(0., layer_count as f32, 0.0, 1.0, layer as f32);
     fn F(p: f32) -> f32 {
         let bias = 0.0;
-        ((2. * p - 1.) / 2.).atan() + p*bias + 0.5f32.atan()
+        ((2. * p - 1.) / 2.).atan() + p * bias + 0.5f32.atan()
     }
     let h = 2.0;
     h * F(pos) / F(1.)
@@ -196,6 +195,7 @@ fn create_terrain(
     // mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<TerrainMaterial>>,
     mut maze_materials: ResMut<Assets<ExtendedMaterial<TerrainMaterial, MazeLayerMaterial>>>,
+    mut grass_materials: ResMut<Assets<ExtendedMaterial<TerrainMaterial, GrassLayerMaterial>>>,
     mut textures: ResMut<Assets<Image>>,
     // player_controller: Query<Entity>,
     mut render_device: ResMut<RenderDevice>,
@@ -207,7 +207,13 @@ fn create_terrain(
     let lattice = create_base_lattice();
     commands.insert_resource(TerrainDataMap::new(&lattice));
     commands.insert_resource(MazeDataHolder::new());
-    let terrain_mesh = create_terrain_mesh(Some(lattice));
+    let orig_lat = lattice.clone();
+    let (terrain_triangulation, terrain_verts) = create_triangulation(Some(lattice));
+    let terrain_mesh = create_terrain_mesh(
+        &terrain_triangulation,
+        &terrain_verts,
+        X_VIEW_DIST_M.max(Z_VIEW_DIST_M) * 1.5,
+    );
 
     let mut heights: Vec<f32> = vec![];
     let dims = 100 / 2;
@@ -256,11 +262,11 @@ fn create_terrain(
         Z_VIEW_DIST_M * 1.1,
     ) {
         // generate a random position in a circle
-        let (r, theta) = cart_to_polar((v.x, v.z));
+        let (r, theta) = cart_to_polar((v.x, v.y));
         let x = (r * SCALE).sinh() / SCALE * theta.cos();
         let z = (r * SCALE).sinh() / SCALE * theta.sin();
         let y = terrain_gen.get_height_for(x, z);
-        delaunay_points.push(Point { x, y: z });
+        delaunay_points.push(Point::from(v.to_array()));
         terrain_material_data_holder.height.push(y as f32);
         terrain_material_data_holder.vertices.push(x as f32);
         terrain_material_data_holder.vertices.push(z as f32);
@@ -269,7 +275,7 @@ fn create_terrain(
         terrain_material_data_holder.gradients.push(grad.y as f32);
     }
 
-    let triangulation = triangulate(&delaunay_points);
+    let data_holder_triangulation = triangulate(&delaunay_points);
     let vtx_count = terrain_mesh.count_vertices();
 
     let material = mats.add(Color::WHITE.into());
@@ -277,11 +283,11 @@ fn create_terrain(
     // let mut triangles = &terrain_material_data_holder.triangles;
     // let mut halfedges = &terrain_material_data_holder.halfedges;
 
-    triangulation.triangles.iter().for_each(|e| {
+    data_holder_triangulation.triangles.iter().for_each(|e| {
         terrain_material_data_holder.triangles.push(*e as u32);
         return;
     });
-    triangulation.halfedges.iter().for_each(|e| {
+    data_holder_triangulation.halfedges.iter().for_each(|e| {
         terrain_material_data_holder.halfedges.push(*e as u32);
         return;
     });
@@ -310,14 +316,14 @@ fn create_terrain(
         grass_line: 0.15,
         tree_line: 0.5,
         snow_line: 0.75,
-        grass_color: Color::from([0.1, 0.4, 0.2, 1.]),
+        grass_color: Color::from([30.0/255.0, 94.0/255.0, 54.0/255.0, 1.]),
         tree_color: Color::from([0.2, 0.5, 0.25, 1.]),
         snow_color: Color::from([0.95, 0.95, 0.95, 1.]),
         stone_color: Color::from([0.34, 0.34, 0.34, 1.]),
-        cosine_max_snow_slope: (45. * PI / 180.).cos(),
+        cosine_max_snow_slope: (65. * PI / 180.).cos(),
         cosine_max_tree_slope: (40. * PI / 180.).cos(),
-        u_bound: ((X_VIEW_DIST_M * TEXTURE_SCALE).asinh() / TEXTURE_SCALE) as f32,
-        v_bound: ((Z_VIEW_DIST_M * TEXTURE_SCALE).asinh() / TEXTURE_SCALE) as f32,
+        u_bound: /*X_VIEW_DIST_M as f32,*/ ((X_VIEW_DIST_M * TEXTURE_SCALE).asinh() / TEXTURE_SCALE) as f32,
+        v_bound: /*Z_VIEW_DIST_M as f32,*/ ((Z_VIEW_DIST_M * TEXTURE_SCALE).asinh() / TEXTURE_SCALE) as f32,
         normal_texture: normal_handle.into(),
         scale: TEXTURE_SCALE as f32,
         triangles: terrain_material_data_holder
@@ -397,17 +403,18 @@ fn create_terrain(
                             Color::rgba(0., 0.8, 1.0, 1.0), // atmospheric inscattering color (light gained due to scattering from the sun)
                         ),
                     },
-                    BloomSettings {
-                        intensity: 0.5,
-                        low_frequency_boost: 0.0,
-                        low_frequency_boost_curvature: 0.0,
-                        high_pass_frequency: 1.0 / 3.0,
-                        prefilter_settings: BloomPrefilterSettings {
-                            threshold: 0.0,
-                            threshold_softness: 0.0,
-                        },
-                        composite_mode: BloomCompositeMode::EnergyConserving,
-                    },
+                    BloomSettings::OLD_SCHOOL,
+                    // BloomSettings {
+                    //     intensity: 0.8,
+                    //     low_frequency_boost: 0.0,
+                    //     low_frequency_boost_curvature: 0.0,
+                    //     high_pass_frequency: 1.0 / 3.0,
+                    //     prefilter_settings: BloomPrefilterSettings {
+                    //         threshold: 0.0,
+                    //         threshold_softness: 0.0,
+                    //     },
+                    //     composite_mode: BloomCompositeMode::EnergyConserving,
+                    // },
                     PlayerCam,
                 ))
                 .with_children(|commands| {
@@ -421,35 +428,20 @@ fn create_terrain(
                 });
         });
 
-    commands.spawn((
-        MaterialMeshBundle {
-            mesh: meshes.add(terrain_mesh.clone()),
-            transform: Transform::from_xyz(0.0, 0.0, 0.0),
-            material: materials.add(base_material.clone()),
-            ..default()
-        },
-        MainTerrain,
-    ));
-
     maze_data_holder
         .raw_maze_data
         .write_buffer(&*render_device, &*render_queue);
 
-    let buf = maze_data_holder.raw_maze_data.buffer().unwrap().clone();
-    const LAYER_COUNT: u32 = 24;
-    for layer in 0..LAYER_COUNT + 1 {
-        let maze_layer_mesh = create_terrain_mesh(Some(create_base_lattice_with_verts(
-            TERRAIN_VERTICES as f64,
-            lin_map(
-                0.,
-                LAYER_COUNT as f64,
-                10.,
-                FOOTHILL_START + 1000.,
-                layer as f64,
-            ),
-        )));
-        
-        let height = maze_layer_height_func(layer, LAYER_COUNT);
+    const MAZE_LAYER_COUNT: u32 = 20;
+    for layer in 0..MAZE_LAYER_COUNT + 1 {
+        let layer = MAZE_LAYER_COUNT - layer;
+        let mut max_dist = X_VIEW_DIST_M.max(Z_VIEW_DIST_M) * 1.5;
+        if layer < MAZE_LAYER_COUNT {
+            max_dist = X_VIEW_DIST_M.max(Z_VIEW_DIST_M) * 1.5;
+        }
+        let maze_layer_mesh = create_terrain_mesh(&terrain_triangulation, &terrain_verts, max_dist);
+
+        let height = maze_layer_height_func(layer, MAZE_LAYER_COUNT);
         println!("height {height}");
         commands.spawn((
             MaterialMeshBundle {
@@ -468,6 +460,42 @@ fn create_terrain(
             MainTerrain,
         ));
     }
+
+    commands.spawn((
+        MaterialMeshBundle {
+            mesh: meshes.add(terrain_mesh.clone()),
+            transform: Transform::from_xyz(0.0, 0.0, 0.0),
+            material: materials.add(base_material.clone()),
+            ..default()
+        },
+        MainTerrain,
+    ));
+    
+    // const GRASS_LAYER_COUNT: u32 = 2;
+    // for layer in 1..GRASS_LAYER_COUNT + 1 {
+    //     let grass_layer_mesh = create_terrain_mesh(
+    //         &terrain_triangulation,
+    //         &terrain_verts,
+    //         lin_map(0., GRASS_LAYER_COUNT as f64, 20., 10000., layer as f64),
+    //     );
+    // 
+    //     let height = lin_map32(0., GRASS_LAYER_COUNT as f32, 0., 0.1, layer as f32);
+    //     println!("height {height}");
+    //     commands.spawn((
+    //         MaterialMeshBundle {
+    //             mesh: meshes.add(grass_layer_mesh),
+    //             transform: Transform::from_xyz(0.0, 0.0, 0.0),
+    //             material: grass_materials.add(ExtendedMaterial {
+    //                 base: base_material.clone(),
+    //                 extension: GrassLayerMaterial {
+    //                     layer_height: height,
+    //                 },
+    //             }),
+    //             ..default()
+    //         },
+    //         MainTerrain,
+    //     ));
+    // }
 
     // commands.entity(controller).push_children(&[terrain]);
 }
@@ -577,7 +605,7 @@ fn main() {
         /*.add_plugins(
             ShaderUtilsPlugin,
         )*/
-        .add_plugins(aether_spyglass::SpyglassPlugin)
+        // .add_plugins(aether_spyglass::SpyglassPlugin)
         .add_plugins(FramepacePlugin)
         .add_plugins(AtmospherePlugin)
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())

@@ -89,80 +89,6 @@ var<storage, read> gradients: array<f32>;
 @group(1) @binding(20)
 var<storage, read_write> triangle_indices: array<u32>;
 
-///// Next halfedge in a triangle.
-//fn next_halfedge(i: u32) -> u32 {
-//    if i % 3u == 2u {
-//        return i - 2u;
-//    } else {
-//        return i + 1u;
-//    }
-//}
-//
-///// Previous halfedge in a triangle.
-//fn prev_halfedge(i: u32) -> u32 {
-//    if i % 3u == 0u {
-//        return i + 2u;
-//    } else {
-//        return i - 1u;
-//    }
-//}
-//
-///// Copied and adapted from
-///// https://observablehq.com/@mootari/delaunay-findtriangle
-///// Returns the orientation of three points A, B and C:
-/////   -1 = counterclockwise
-/////    0 = collinear
-/////    1 = clockwise
-///// More on the topic: http://www.dcs.gla.ac.uk/~pat/52233/slides/Geometry1x1.pdf
-//fn orientation(a: vec2<f32>, b: vec2<f32>, c: vec2<f32>) -> f32 {
-//    // Determinant of vectors of the line segments AB and BC:
-//    // [ cx - bx ][ bx - ax ]
-//    // [ cy - by ][ by - ay ]
-//    return sign((c.x - b.x) * (b.y - a.y) - (c.y - b.y) * (b.x - a.x));
-//}
-//
-//fn find_triangle(p: vec2<f32>, edge: u32) -> u32 {
-//    if edge == max_u32 {
-//        return edge;
-//    }
-//    // coords is required for delaunator compatibility.
-//    var current = edge;
-//    var start = current;
-//    var n: u32 = 0u;
-//
-//    // we don't want to go more than 20 times
-//    for (var i: i32 = 0; i < 100; i++) {
-//        let next: u32 = next_halfedge(current);
-//        let pc: u32 = 2u * triangles[current];
-//        let pn: u32 = 2u * triangles[next];
-//
-//        let a = vec2<f32>(vertices[pc], vertices[pc + 1u]);
-//        let b = vec2<f32>(vertices[pn], vertices[pn + 1u]);
-//
-//        let ori: f32 = orientation(a, b, p);
-//
-//        if ori >= 0. {
-//            current = next;
-//            if start == current {
-//                break;
-//            }
-//        } else {
-//            if halfedges[current] == max_u32 {
-//                break;
-//            }
-//            current = halfedges[current];
-//            n += 1u;
-//            if n % 2u != 0u {
-//                current = next_halfedge(current);
-//            } else {
-//                current = prev_halfedge(current);
-//            }
-//            start = current;
-//        }
-//    }
-//    return current;
-//}
-
 // Copied and adapted from https://gamedev.stackexchange.com/a/23745
 // Compute barycentric coordinates (u, v, w) for
 // point p with respect to triangle (a, b, c)
@@ -223,7 +149,9 @@ fn vertex(vertex_no_morph: Vertex) -> CuravtureMeshVertexOutput {
 
 #ifdef VERTEX_POSITIONS
 
+#ifdef VERTEX_UVS
     out.uv = vertex.uv;
+#endif
     out.world_position = bevy_pbr::mesh_functions::mesh_position_local_to_world(model, vec4<f32>(vertex.position, 1.0));
 
 //    var previous = triangle_indices[vertex.vertex_index];
@@ -261,28 +189,28 @@ fn vertex(vertex_no_morph: Vertex) -> CuravtureMeshVertexOutput {
     /// where r_e is the radius of the earth and v is the vertex's world pos
     let view_world_pos = bevy_pbr::mesh_view_bindings::view.world_position.xyz;
     let rel_pos = out.world_position.xyz - view_world_pos;
-    let origin_dist: f32 = sqrt(rel_pos[0]*rel_pos[0] + rel_pos[2]*rel_pos[2]);
+    let origin_dist: f32 = length(rel_pos.xz);
     if origin_dist > 1000.0 {
         // only apply our transformation at large distances, because otherwise
         // rounding errors become noticable
         let EARTH_RAD: f32 = (6.378e+6);
         let theta: f32 = origin_dist / EARTH_RAD;
-        let r = EARTH_RAD + out.world_position[1];
+        let r = EARTH_RAD + out.world_position.y;
         let unrotated_pos = vec3<f32>(r * sin(theta), r * (cos(theta) - 1.0), 0.0);
         /// Now we rotate it to match the original
         /// (signed) angle of the original is phi = atan2(v_z, v_x * v_z)
         var phi: f32 = 0.0;
-        if (rel_pos[0] != 0.0) {
-            phi = -atan2(rel_pos[2], rel_pos[0]);
+        if (rel_pos.x != 0.0) {
+            phi = -atan2(rel_pos.z, rel_pos.x);
         }
         let rotation_mat = mat3x3<f32>(cos(phi), 0.0, -sin(phi), 0.0, 1.0, 0.0, sin(phi), 0.0, cos(phi));
         let mapped: vec3<f32> = rotation_mat*unrotated_pos + view_world_pos;
         out.world_position =
             vec4<f32>(
-                mapped[0],
-                mapped[1] + out.world_position[1] - view_world_pos[1],
-                mapped[2],
-                out.world_position[3]);
+                mapped.x,
+                mapped.y + out.world_position.y - view_world_pos.y,
+                mapped.z,
+                out.world_position.w);
     }
     out.position = position_world_to_clip(out.world_position.xyz);
 #endif

@@ -3,10 +3,7 @@ use crate::terrain_render::TERRAIN_VERTICES;
 use bevy::asset::{load_internal_asset, Asset};
 use bevy::core_pipeline::core_3d;
 use bevy::core_pipeline::core_3d::graph::node::START_MAIN_PASS;
-use bevy::pbr::{
-    ExtendedMaterial, ExtractedMaterials, MaterialExtension, MaterialPipeline, MaterialPipelineKey,
-    PrepassPipeline, RenderMaterials,
-};
+use bevy::pbr::{ExtendedMaterial, ExtractedMaterials, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline, MaterialPipeline, MaterialPipelineKey, PrepassPipeline, RenderMaterials};
 use bevy::prelude::*;
 use bevy::reflect::TypeUuid;
 use bevy::render::extract_component::{ExtractComponent, ExtractComponentPlugin};
@@ -33,6 +30,7 @@ use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::rc::Rc;
 use std::sync::Arc;
+use bevy::render::render_resource::Face::Back;
 // use bevy::render::RenderApp;
 // use bevy::render::renderer::{RenderAdapter, RenderDevice};
 
@@ -156,15 +154,22 @@ impl Material for TerrainMaterial {
     fn fragment_shader() -> ShaderRef {
         "shaders/terrain_color.wgsl".into()
     }
+}
 
-    fn specialize(
-        _pipeline: &MaterialPipeline<Self>,
-        descriptor: &mut RenderPipelineDescriptor,
-        _layout: &MeshVertexBufferLayout,
-        _key: MaterialPipelineKey<Self>,
-    ) -> Result<(), SpecializedMeshPipelineError> {
-        descriptor.primitive.cull_mode = None;
-        return Ok(());
+#[derive(Asset, TypePath, TypeUuid, AsBindGroup, Debug, Clone)]
+#[uuid = "b62bb455-a72c-4b56-87bb-81e0554e234b"]
+pub struct GrassLayerMaterial {
+    #[uniform(23)]
+    pub layer_height: f32,
+}
+
+impl MaterialExtension for GrassLayerMaterial {
+    fn vertex_shader() -> ShaderRef {
+        "shaders/grass_curvature_transform.wgsl".into()
+    }
+
+    fn fragment_shader() -> ShaderRef {
+        "shaders/grass_color.wgsl".into()
     }
 }
 
@@ -194,6 +199,16 @@ impl MaterialExtension for MazeLayerMaterial {
     fn fragment_shader() -> ShaderRef {
         "shaders/maze_color.wgsl".into()
     }
+
+    fn specialize(
+        _pipeline: &MaterialExtensionPipeline,
+        descriptor: &mut RenderPipelineDescriptor,
+        _layout: &MeshVertexBufferLayout,
+        _key: MaterialExtensionKey<Self>,
+    ) -> Result<(), SpecializedMeshPipelineError> {
+        descriptor.primitive.cull_mode = None;
+        return Ok(());
+    }
 }
 
 pub struct TerrainPlugin {}
@@ -211,6 +226,9 @@ impl Plugin for TerrainPlugin {
         app.add_plugins(MaterialPlugin::<TerrainMaterial> { ..default() });
         app.add_plugins(
             MaterialPlugin::<ExtendedMaterial<TerrainMaterial, MazeLayerMaterial>> { ..default() },
+        );
+        app.add_plugins(
+            MaterialPlugin::<ExtendedMaterial<TerrainMaterial, GrassLayerMaterial>> { ..default() },
         );
 
         let render_app = app.sub_app_mut(RenderApp);

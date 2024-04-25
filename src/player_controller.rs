@@ -1,4 +1,4 @@
-use crate::terrain_render::{LATTICE_GRID_SIZE, MainTerrain};
+use crate::terrain_render::{MainTerrain, LATTICE_GRID_SIZE};
 use bevy::core::Zeroable;
 use bevy::core_pipeline::fxaa::Sensitivity;
 use bevy::input::mouse::{MouseMotion, MouseWheel};
@@ -83,7 +83,8 @@ pub fn mouse_look(
     body_tf.rotate(Quat::from_scaled_axis(
         rot * Vec3::Y * cumulative.x / 180.0 * sens,
     ));
-    let mut new_trans = (body_tf.translation.clone() / LATTICE_GRID_SIZE as f32)/*.floor()*/ * LATTICE_GRID_SIZE as f32;
+    let mut new_trans =
+        (body_tf.translation.clone() / LATTICE_GRID_SIZE as f32)/*.round()*/ * LATTICE_GRID_SIZE as f32;
     new_trans.y = 0.;
     for mut terrain_tf in terrain.iter_mut() {
         terrain_tf.translation = new_trans;
