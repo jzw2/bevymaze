@@ -8,7 +8,7 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
 
-pub const SQUARE_MAZE_CELL_COUNT: i64 = 16;
+pub const SQUARE_MAZE_CELL_COUNT: i64 = 8;
 pub const SQUARE_MAZE_CELL_SIZE: f64 = 2.0f64;
 pub const SQUARE_MAZE_WALL_WIDTH: f64 = 0.05f64;
 
@@ -24,7 +24,7 @@ impl SquareMaze {
         return i < x - fuzz
             || j < y - fuzz
             || i >= x + self.size + fuzz
-            || j > y + self.size + fuzz;
+            || j >= y + self.size + fuzz;
     }
 
     pub fn new(cell: (i64, i64)) -> Self {
@@ -193,7 +193,7 @@ impl MazeBitRep for SquareMaze {
 }
 
 /// Adds starting nodes to `graph`
-fn square_starting_nodes(graph: &SquareMaze) -> Vec<SquareMazeComponent> {
+pub fn square_starting_nodes(graph: &SquareMaze) -> Vec<SquareMazeComponent> {
     let mut components = vec![];
     let mut rng = thread_rng();
     let (x, y) = graph.offset();
@@ -202,14 +202,14 @@ fn square_starting_nodes(graph: &SquareMaze) -> Vec<SquareMazeComponent> {
         components.push(left.maze);
     } else {
         let mut comp = SquareMazeComponent::default();
-        comp.add_node((x - 1, y + rng.gen_range(0, graph.size)));
+        comp.add_node((x - 1, y + rng.gen_range(0..graph.size)));
         components.push(comp);
     }
     if let Some(right) = SquareMaze::load((graph.cell.0 + 1, graph.cell.1)) {
         components.push(right.maze);
     } else {
         let mut comp = SquareMazeComponent::default();
-        comp.add_node((x + graph.size, y + rng.gen_range(0, graph.size)));
+        comp.add_node((x + graph.size, y + rng.gen_range(0..graph.size)));
         components.push(comp);
     }
 
@@ -217,7 +217,7 @@ fn square_starting_nodes(graph: &SquareMaze) -> Vec<SquareMazeComponent> {
         components.push(top.maze);
     } else {
         let mut comp = SquareMazeComponent::default();
-        comp.add_node((x + rng.gen_range(0, graph.size), y - 1));
+        comp.add_node((x + rng.gen_range(0..graph.size), y - 1));
         components.push(comp);
     }
 
@@ -225,7 +225,7 @@ fn square_starting_nodes(graph: &SquareMaze) -> Vec<SquareMazeComponent> {
         components.push(bottom.maze);
     } else {
         let mut comp = SquareMazeComponent::default();
-        comp.add_node((x + rng.gen_range(0, graph.size), y + graph.size));
+        comp.add_node((x + rng.gen_range(0..graph.size), y + graph.size));
         components.push(comp);
     }
 

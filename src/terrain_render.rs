@@ -9,11 +9,12 @@ use bevy::prelude::{Component, Image, Mesh, Reflect, Resource};
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_resource::TextureFormat::{R32Float, Rg8Snorm, Rgba8Snorm};
 use bevy::render::render_resource::{Extent3d, TextureDimension};
+use bevy::utils::default;
 use delaunator::{prev_halfedge, triangulate, Triangulation};
 use futures_util::{pin_mut, Stream, StreamExt};
 use image::{ImageBuffer, Rgb, RgbImage};
 use ordered_float::OrderedFloat;
-use rand::{Rng, thread_rng};
+use rand::{thread_rng, Rng};
 // use rand::{thread_rng, Rng};
 // use tokio::net::TcpStream;
 // use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -37,47 +38,18 @@ pub const X_VIEW_DIST_M: f64 = X_VIEW_DISTANCE as f64 * TILE_SIZE;
 pub const Z_VIEW_DIST_M: f64 = Z_VIEW_DISTANCE as f64 * TILE_SIZE;
 /// Number of vertices of our mesh
 pub const TERRAIN_VERTICES: usize = 80000;
+pub const DENSE_TERRAIN_VERTICES: usize = 10000;
 
 pub const PROB_TIGHTNESS: f64 = 100.0;
 
 pub const SCALE: f64 = 0.15;
 pub const TEXTURE_SCALE: f64 = 0.0001;
 
-pub const LATTICE_GRID_SIZE: f64 = 1.0;
+pub const LATTICE_GRID_SIZE: f64 = 0.75;
 
 #[derive(Component, Default, Reflect)]
 #[reflect(Component)]
 pub struct MainTerrain;
-
-/// Gets the height of the tile for a tile position
-/// `xr` and `yr` are in the range `[0, 1]`
-pub fn get_tile_height(xr: f32, yr: f32, height_map: &HeightMap) -> f32 {
-    let dims = height_map.len() as f32 - 1.;
-    return height_map[(xr * dims).round() as usize][(yr * dims).round() as usize] as f32;
-}
-
-pub fn get_tile_normal(xr: f32, yr: f32, normals: &TerrainNormals) -> [f32; 3] {
-    let dims = normals.len() as f32 - 1.;
-    return normals[(xr * dims).round() as usize][(yr * dims).round() as usize]
-        .as_vec3()
-        .to_array();
-}
-
-/// Get the color of a vertex
-/// this is essentially the material
-pub fn vertex_color(vertex: [f32; 3]) -> [f32; 4] {
-    // first get the height as a fraction of total possible height
-    let height_frac = (vertex[1] as f64 / MAX_HEIGHT) as f32;
-    if height_frac < 0.3 {
-        return [0.1, 0.5, 0.2, 1.];
-    } else if height_frac < 0.5 {
-        return [0.2, 0.6, 0.25, 1.];
-    } else if height_frac > 0.8 {
-        return [0.95, 0.95, 0.95, 1.];
-    }
-
-    return [0.2, 0.2, 0.2, 1.];
-}
 
 pub fn bary_poly_smooth_interp(
     ai: usize,
@@ -113,9 +85,11 @@ pub fn bary_poly_smooth_interp(
 /// So we calculate the length of the axes and then we use the formula x^2/a^2 + y^2/b^2 = 1
 /// to get the specific height/width of the ellipse at a certain position along one of the axes
 pub fn create_lattice_plane(
-    approx_vertex_count: f64,
+    mut approx_vertex_count: f64,
     x_view_distance: f64,
     z_view_distance: f64,
+    dense_vertex_count: f64,
+    dense_lattice_size: f64,
 ) -> Vec<DVec2> {
     let mut verts: HashSet<[OrderedFloat<f64>; 2]> = HashSet::new();
     let x_bound = (x_view_distance * SCALE).asinh() / SCALE;
@@ -124,6 +98,8 @@ pub fn create_lattice_plane(
 
     let z_0_sqr: f64 = 3. / 4.;
     let z_0 = z_0_sqr.sqrt();
+
+    approx_vertex_count -= dense_vertex_count;
 
     let x_verts = (z_0 * approx_vertex_count * aspect_ratio / PI)
         .sqrt()
@@ -159,9 +135,32 @@ pub fn create_lattice_plane(
                 x_verts as f64,
                 -x_bound,
                 x_bound,
-                x_idx as f64 + thread_rng().gen_range(0.25..0.75)/* * (z_idx % 2) as f64*/,
+                x_idx as f64 + thread_rng().gen_range(0.25..0.75), /* * (z_idx % 2) as f64*/
             );
             verts.insert([OrderedFloat(x_pos), OrderedFloat(z_pos)]);
+        }
+    }
+
+    // add in the dense section
+    let dense_radius = (dense_vertex_count / PI).sqrt().round() as i64;
+    for x in -dense_radius..dense_radius {
+        let z_height = (dense_radius.pow(2) as f64 - x.pow(2) as f64)
+            .sqrt()
+            .round() as i64;
+        let x_pos = x as f64 * dense_lattice_size;
+        for z in -z_height..z_height {
+            let z_pos = z as f64 * dense_lattice_size;
+            let mut pos = DVec2::new(x_pos, z_pos);
+
+            // we have to reverse map it to elipse-space
+            // TODO: make this more efficient
+            let mag = pos.length();
+            if mag != 0. {
+                let scale_fac = ((mag * SCALE).asinh() / SCALE) / mag;
+                pos *= scale_fac;
+            }
+
+            verts.insert([OrderedFloat(pos.x), OrderedFloat(pos.y)]);
         }
     }
 
@@ -187,7 +186,7 @@ pub fn transform_lattice_positions(lattice: &mut Vec<DVec2>, rounding: Option<f6
         }
         // round the transformed pos to the nearest grid pos (quarter of a meter)
         if let Some(rounding) = rounding {
-            *lattice_pos = (*lattice_pos / rounding)/*.round()*/ * rounding;
+            *lattice_pos = (*lattice_pos / rounding).round() * rounding;
         }
         verts.insert([OrderedFloat(lattice_pos.x), OrderedFloat(lattice_pos.y)]);
     }
@@ -274,15 +273,36 @@ pub fn angle_sort_verts(verts: &mut Vec<DVec2>) {
 }
 
 pub fn create_base_lattice() -> Vec<DVec2> {
-    return create_base_lattice_with_verts(TERRAIN_VERTICES as f64);
+    return create_base_lattice_with_verts(TERRAIN_VERTICES as f64, DENSE_TERRAIN_VERTICES as f64);
 }
 
-pub fn create_base_lattice_with_verts(approx_vertex_count: f64) -> Vec<DVec2> {
-    return create_lattice(approx_vertex_count, X_VIEW_DIST_M, Z_VIEW_DIST_M);
+pub fn create_base_lattice_with_verts(
+    approx_vertex_count: f64,
+    dense_vertex_count: f64,
+) -> Vec<DVec2> {
+    return create_lattice(
+        approx_vertex_count,
+        X_VIEW_DIST_M,
+        Z_VIEW_DIST_M,
+        dense_vertex_count,
+        LATTICE_GRID_SIZE,
+    );
 }
 
-pub fn create_lattice(approx_vertex_count: f64, x_view_dist: f64, z_view_dist: f64) -> Vec<DVec2> {
-    let mut verts = create_lattice_plane(approx_vertex_count, x_view_dist, z_view_dist);
+pub fn create_lattice(
+    approx_vertex_count: f64,
+    x_view_dist: f64,
+    z_view_dist: f64,
+    dense_vertex_count: f64,
+    dense_lattice_size: f64,
+) -> Vec<DVec2> {
+    let mut verts = create_lattice_plane(
+        approx_vertex_count,
+        x_view_dist,
+        z_view_dist,
+        dense_vertex_count,
+        dense_lattice_size,
+    );
     transform_lattice_positions(&mut verts, Some(LATTICE_GRID_SIZE));
     //hilbert_order_verts(&mut verts, x_view_dist, z_view_dist);
     angle_sort_verts(&mut verts);
@@ -357,21 +377,33 @@ pub fn create_triangulation(lattice: Option<Vec<DVec2>>) -> (Triangulation, Vec<
 }
 
 /// Create a terrain mesh but without baked heights
-pub fn create_terrain_mesh(triangulation: &Triangulation, verts: &Vec<DVec2>, max_dist: f64) -> Mesh {
+pub fn create_terrain_mesh(
+    triangulation: &Triangulation,
+    verts: &Vec<DVec2>,
+    max_dist: f64,
+) -> Mesh {
     // iterate over the triangles, and remove any OOB triangles
     let mut triangles: Vec<[usize; 3]> = vec![];
     for tri in 0..triangulation.len() {
-        triangles.push([triangulation.triangles[3*tri], triangulation.triangles[3*tri + 1], triangulation.triangles[3*tri + 2]]);
+        triangles.push([
+            triangulation.triangles[3 * tri],
+            triangulation.triangles[3 * tri + 1],
+            triangulation.triangles[3 * tri + 2],
+        ]);
     }
     let max_dist_sqr = max_dist * max_dist;
-    let indices: Vec<u32> = triangles.iter().filter_map(|t | {
-        for v in t {
-            if verts[*v].length_squared() < max_dist_sqr {
-                return Some([t[0] as u32, t[1] as u32, t[2] as u32]);
+    let indices: Vec<u32> = triangles
+        .iter()
+        .filter_map(|t| {
+            for v in t {
+                if verts[*v].length_squared() < max_dist_sqr {
+                    return Some([t[0] as u32, t[1] as u32, t[2] as u32]);
+                }
             }
-        }
-        return None;
-    }).flatten().collect();
+            return None;
+        })
+        .flatten()
+        .collect();
 
     let positions: Vec<_> = verts
         .iter()
@@ -382,9 +414,9 @@ pub fn create_terrain_mesh(triangulation: &Triangulation, verts: &Vec<DVec2>, ma
         })
         .collect();
 
-    let mut terrain_mesh = Mesh::new(PrimitiveTopology::TriangleList);
+    let mut terrain_mesh = Mesh::new(PrimitiveTopology::TriangleList, default());
     terrain_mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    terrain_mesh.set_indices(Some(Indices::U32(indices)));
+    terrain_mesh.insert_indices(Indices::U32(indices));
     return terrain_mesh;
 }
 
@@ -465,5 +497,6 @@ pub fn create_terrain_normal_map(generator: &TerrainGenerator) -> Image {
         TextureDimension::D2,
         simple_data,
         Rg8Snorm,
+        default(),
     );
 }

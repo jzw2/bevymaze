@@ -60,33 +60,33 @@ struct Vertex {
 
 const max_u32: u32 = 4294967295u;
 
-@group(1) @binding(10)
+@group(2) @binding(10)
 var<uniform> u_bound: f32;
-@group(1) @binding(11)
+@group(2) @binding(11)
 var<uniform> v_bound: f32;
 
 /// len is MAX_TRIANGLES * 3
-@group(1) @binding(15)
+@group(2) @binding(15)
 var<storage, read> triangles: array<u32>;
 
 /// len is MAX_TRIANGLES * 3
-@group(1) @binding(16)
+@group(2) @binding(16)
 var<storage, read> halfedges: array<u32>;
 
 /// len is 2 * MAX_VERTICES
-@group(1) @binding(17)
+@group(2) @binding(17)
 var<storage, read> vertices: array<f32>;
 
 /// len is MAX_VERTICES
-@group(1) @binding(18)
+@group(2) @binding(18)
 var<storage, read> height: array<f32>;
 
 /// len is 2 * MAX_VERTICES
-@group(1) @binding(19)
+@group(2) @binding(19)
 var<storage, read> gradients: array<f32>;
 
 /// len is TERRAIN_VERTICES
-@group(1) @binding(20)
+@group(2) @binding(20)
 var<storage, read_write> triangle_indices: array<u32>;
 
 // Copied and adapted from https://gamedev.stackexchange.com/a/23745

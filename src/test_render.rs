@@ -1,8 +1,9 @@
 use crate::maze_render::{
-    distance_to_arc, distance_to_circle, distance_to_segment, Arc, Circle, Segment,
+    distance_to_arc, distance_to_circle, distance_to_segment, CircleArc, Circle, Segment,
 };
 use image::{Rgb, RgbImage};
 use std::cmp::{max, min};
+use bevy::math::DVec2;
 
 pub struct DrawableCircle {
     pub(crate) circle: Circle,
@@ -17,7 +18,7 @@ pub struct DrawableSegment {
 }
 
 pub struct DrawableArc {
-    pub(crate) arc: Arc,
+    pub(crate) arc: CircleArc,
     pub(crate) color: Rgb<u8>,
     pub(crate) line_width: f64,
 }
@@ -28,8 +29,8 @@ pub struct AxisTransform {
     pub(crate) scale: (f64, f64),
 }
 
-pub fn to_canvas_space(pixel_space_coordinate: (u32, u32), transform: AxisTransform) -> (f64, f64) {
-    return (
+pub fn to_canvas_space(pixel_space_coordinate: (u32, u32), transform: AxisTransform) -> DVec2 {
+    return DVec2::new(
         (pixel_space_coordinate.0 as f64 - transform.offset.0) / transform.scale.0,
         (pixel_space_coordinate.1 as f64 - transform.offset.1) / transform.scale.1,
     );

@@ -19,7 +19,7 @@
 
 //#import bevy_shader_utils::perlin_noise_2d perlin_noise_2d
 
-#import bevymaze::util::{lin_map, hash12, hash11, positive_rem}
+#import bevymaze::util::{lin_map, hash12, hash11, positive_rem, pos_rem_vec}
 
 #import bevy_pbr::{
     //forward_io::VertexOutput,
@@ -28,82 +28,109 @@
     //pbr_functions as fns,
 }
 
-@group(1) @binding(0)
+@group(2) @binding(0)
 var<uniform> max_height: f32;
-@group(1) @binding(1)
+@group(2) @binding(1)
 var<uniform> grass_line: f32;
-@group(1) @binding(2)
+@group(2) @binding(2)
 var<uniform> tree_line: f32;
-@group(1) @binding(3)
+@group(2) @binding(3)
 var<uniform> snow_line: f32;
-@group(1) @binding(4)
+@group(2) @binding(4)
 var<uniform> grass_color: vec4<f32>;
-@group(1) @binding(5)
+@group(2) @binding(5)
 var<uniform> tree_color: vec4<f32>;
-@group(1) @binding(6)
+@group(2) @binding(6)
 var<uniform> snow_color: vec4<f32>;
-@group(1) @binding(7)
+@group(2) @binding(7)
 var<uniform> stone_color: vec4<f32>;
-@group(1) @binding(8)
+@group(2) @binding(8)
 var<uniform> cosine_max_snow_slope: f32;
-@group(1) @binding(9)
+@group(2) @binding(9)
 var<uniform> cosine_max_tree_slope: f32;
-@group(1) @binding(10)
+@group(2) @binding(10)
 var<uniform> u_bound: f32;
-@group(1) @binding(11)
+@group(2) @binding(11)
 var<uniform> v_bound: f32;
-@group(1) @binding(12)
+@group(2) @binding(12)
 var normal_texture: texture_2d<f32>;
-@group(1) @binding(13)
+@group(2) @binding(13)
 var normal_sampler: sampler;
-@group(1) @binding(14)
+@group(2) @binding(14)
 var<uniform> scale: f32;
 
-@group(1) @binding(23)
+@group(2) @binding(23)
 var<uniform> layer_height: f32;
 
-const MAZE_DATA_COUNT = 16;
-const MAZE_CELLS_X = 4;
-const MAZE_CELLS_Y = 4;
+const COMPONENT_CELLS: u32 = #{COMPONENT_CELLS_DEF__};
+const PATH_WIDTH: f32 = f32(#{PATH_WIDTH_DEF__});
+const MAZE_DATA_COUNT: u32 = COMPONENT_CELLS * COMPONENT_CELLS * 2u / 32u;
+const MAZE_COMPONENTS = #{MAZE_COMPONENTS_DEF__};
+const COMPONENT_SIZE: f32 = PATH_WIDTH * 2.0 * f32(COMPONENT_CELLS);
 
-//const MAZE_CELL_SIZE = 128.0;
+//const MAZE_COMPONENT_SIZE = 128.0;
 
-@group(1) @binding(24)
-var<storage, read> maze: array<array<array<u32, MAZE_DATA_COUNT>, MAZE_CELLS_Y>, MAZE_CELLS_X>;
+@group(2) @binding(24)
+var<storage, read> maze: array<array<array<u32, MAZE_DATA_COUNT>, MAZE_COMPONENTS>, MAZE_COMPONENTS>;
 
-@group(1) @binding(25)
+@group(2) @binding(25)
 var<uniform> maze_top_left: vec2<f32>;
 
 fn is_in_path(pos: vec2<f32>) -> bool {
     let top_left_i32 = vec2<i32>(i32(maze_top_left.x), i32(maze_top_left.y));
-    var i = i32(floor(pos.x / 64.0f));
-    var j = i32(floor(pos.y / 64.0f));
-    i = i - top_left_i32.x;
-    j = j - top_left_i32.y;
-    i = clamp(i, 0, MAZE_CELLS_X - 1);
-    j = clamp(j, 0, MAZE_CELLS_X - 1);
+    var comp = vec2<i32>(floor(pos / COMPONENT_SIZE));
+    comp -= top_left_i32;
+    comp.x = clamp(comp.x, 0, i32(MAZE_COMPONENTS) - 1);
+    comp.y = clamp(comp.y, 0, i32(MAZE_COMPONENTS) - 1);
 
-    let cell = vec2<u32>(u32(floor(positive_rem(pos.x, 64.0f))), u32(floor(positive_rem(pos.y, 64.0f))));
-    let quad = vec2<u32>(u32(floor(positive_rem(pos.x, 2.0f))),  u32(floor(positive_rem(pos.y, 2.0f))));
+    let cell = vec2<u32>(floor(pos_rem_vec(pos / (PATH_WIDTH * 2.0), COMPONENT_SIZE)));
+    let quad = pos_rem_vec(pos, PATH_WIDTH * 2.0);
 
-    if quad.x == 0u && quad.y == 0u {
+    if quad.x < PATH_WIDTH && quad.y < PATH_WIDTH {
         return false;
-    } else if quad.x == 1u && quad.y == 1u {
+    } else if quad.x >= PATH_WIDTH && quad.y >= PATH_WIDTH {
         return true;
-    } else if quad.x == 0u && quad.y == 1u {
-        let bit = u32((cell.x + cell.y * 16u) * 2u);
-        let word = u32(bit / 32u);
-        let offset = u32(bit % 32u);
-        let word_val = u32(maze[i][j][word]);
-        return ((word_val >> offset) & 1u) == 1u;
-    } else if quad.x == 1u && quad.y == 0u {
-        let bit = u32((cell.x + cell.y * 16u) * 2u) + 1u;
+    } else if quad.x < PATH_WIDTH && quad.y >= PATH_WIDTH {
+        let bit = u32((cell.x + cell.y * COMPONENT_CELLS) * 2u);
         let word = bit / 32u;
-        let offset = u32(bit % 32u);
-        let word_val = u32(maze[i][j][word]);
+        let offset = bit % 32u;
+        let word_val = maze[comp.x][comp.y][word];
+        return ((word_val >> offset) & 1u) == 1u;
+    } else if quad.x >= PATH_WIDTH && quad.y < PATH_WIDTH {
+        let bit = u32((cell.x + cell.y * COMPONENT_CELLS) * 2u) + 1u;
+        let word = bit / 32u;
+        let offset = bit % 32u;
+        let word_val = maze[comp.x][comp.y][word];
         return ((word_val >> offset) & 1u) == 1u;
     }
     return true;
+}
+
+fn sqr_dist_to_unit_square(pos: vec2<f32>, square_pos: vec2<f32>) -> f32 {
+    let r = floor(square_pos / PATH_WIDTH) * PATH_WIDTH + PATH_WIDTH / 2.0;
+    let d = max(abs(pos - r) - PATH_WIDTH / 2.0, vec2<f32>(0.0, 0.0));
+    return d.x * d.x + d.y * d.y;
+}
+
+fn dist_to_path(pos: vec2<f32>) -> f32 {
+    if is_in_path(pos) {
+        return 0.0;
+    }
+
+    var sqr_dist = PATH_WIDTH * PATH_WIDTH;
+    for(var x: i32 = -1; x <= 1; x++) {
+        for(var y: i32 = -1; y <= 1; y++) {
+            if x == 0 && y == 0 {
+                continue;
+            }
+            let square_pos = pos + vec2<f32>(PATH_WIDTH * f32(x), PATH_WIDTH * f32(y));
+            if is_in_path(square_pos) {
+                sqr_dist = min(sqr_dist, sqr_dist_to_unit_square(pos, square_pos));
+            }
+        }
+    }
+
+    return sqrt(sqr_dist);
 }
 
 fn is_in_flower(pos: vec2<f32>) -> bool {
@@ -146,31 +173,35 @@ fn fragment(
     pbr.N = pbr.world_normal;
     pbr.V = pbr_functions::calculate_view(in.world_position, false);
 
-    let height_frac = in.original_world_position.y / max_height + 0.0; //0.08 * perlin_noise_2d(pos_vector);
+    let height_frac = in.original_world_position.y / max_height + 0.0;
     if (height_frac >= grass_line) {
         discard;
     }
 
-    let leaf = floor(in.world_position.xz * 60.0f);
+    let leaf = floor(in.world_position.xz * 50.0f);
 
-    if is_in_path(in.original_world_position.xz / 2.0) {
+    if is_in_path(in.original_world_position.xz) {
         discard;
     }
 
-    if is_in_flower(leaf) {
+    if is_in_flower(leaf / 2.0) {
         pbr.material.base_color = vec4<f32>(149.0/255.0, 68.0/255.0, 166.0/255.0, 1.0);
     } else {
         let rand = hash12(leaf * layer_height);
         let norm_l_height = layer_height / 2.5f;
-        if rand < 0.7 {
+        let dist = min(3.0 * dist_to_path(leaf / 50.0f) / (PATH_WIDTH / 2.0), 1.0);
+        if rand < 0.8 * dist {
             pbr.material.base_color = grass_color * norm_l_height * 1.1;
         } else {
             discard;
         }
     }
 
-    pbr.material.perceptual_roughness = 0.90;
-    pbr.material.reflectance = 0.2;
+    var comp_col = hash12(vec2<f32>(floor(in.original_world_position.xz / COMPONENT_SIZE)));
+    pbr.material.base_color *= comp_col;
+
+    pbr.material.perceptual_roughness = 0.95;
+    pbr.material.reflectance = 0.02;
     var output_color = pbr_functions::apply_pbr_lighting(pbr);
     output_color = pbr_functions::apply_fog(fog, output_color, in.world_position.xyz, view.world_position.xyz);
 

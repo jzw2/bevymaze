@@ -1,4 +1,6 @@
 use crate::fabian::find_triangle;
+use crate::loader::ServerRequestSender;
+use crate::maze_loader::MazeResponseReceiver;
 use crate::player_controller::{PlayerBody, PlayerCam};
 use crate::shaders::{TerrainMaterial, TerrainMaterialDataHolder, MAX_VERTICES};
 use crate::terrain_render::*;
@@ -13,16 +15,17 @@ use bevy::render::mesh::VertexAttributeValues::Float32x3;
 use bevy::render::render_resource::encase::private::RuntimeSizedArray;
 use bevy::render::renderer::{RenderDevice, RenderQueue};
 use bevy::tasks::{block_on, AsyncComputeTaskPool, Task};
+use bevy_flycam::FlyCam;
 use bevy_rapier3d::geometry::Collider;
 use bevy_tokio_tasks::TokioTasksRuntime;
-use crossbeam_channel::{bounded, Receiver};
+use crossbeam_channel::{bounded, Receiver, Sender};
 use delaunator::{triangulate, Point, Triangulation};
 use futures_lite::{future, StreamExt};
 use futures_util::SinkExt;
 use hilbert::transform;
 use itertools::{enumerate, Itertools};
-use kiddo::float::kdtree::KdTree;
-use kiddo::{ImmutableKdTree, SquaredEuclidean};
+use kdtree::distance::squared_euclidean;
+use kdtree::KdTree;
 use postcard::{from_bytes, to_stdvec, to_vec};
 use rand::rngs::StdRng;
 use rand::{thread_rng, Rng, SeedableRng};
@@ -41,6 +44,7 @@ use tokio_tungstenite::tungstenite::Error;
 use tokio_tungstenite::tungstenite::Message::Binary;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use url::Url;
+use crate::nearest_neighbor::TerrainDataMap;
 
 /// Quarter meter data tolerance when the player is 1m away
 const DATA_TOLERANCE: f64 = 0.5;
@@ -61,6 +65,12 @@ pub struct TerrainDataUpdate {
 }
 
 #[derive(Resource, Deref)]
+pub struct TerrainResponseSender(pub Sender<Vec<TerrainDataPoint>>);
+
+#[derive(Resource, Deref)]
+pub struct TerrainResponseReceiver(pub Receiver<Vec<TerrainDataPoint>>);
+
+#[derive(Resource, Deref)]
 pub struct TerrainUpdateReceiver(Receiver<TerrainDataUpdate>);
 
 #[derive(Resource)]
@@ -75,6 +85,7 @@ pub struct TerrainUpdateProcHandle(pub JoinHandle<()>);
 pub fn setup_transform_res(
     mut commands: Commands,
     transform: Query<&GlobalTransform, (With<PlayerCam>, Without<PlayerBody>)>,
+    // transform: Query<&GlobalTransform, (With<FlyCam>, Without<PlayerBody>)>,
 ) {
     println!("Setup transform res {}", transform.is_empty());
     let tf = transform.single();
@@ -87,9 +98,10 @@ pub fn setup_transform_res(
 pub fn update_transform_res(
     transform_res: ResMut<MeshOffsetRes>,
     transform: Query<&GlobalTransform, (With<PlayerCam>, Without<PlayerBody>)>,
+    // transform: Query<&GlobalTransform, (With<FlyCam>, Without<PlayerBody>)>,
     mut terrain_material: ResMut<Assets<TerrainMaterial>>,
 ) {
-    let mut old = (transform.single().translation().clone() / LATTICE_GRID_SIZE as f32)/*.round()*/
+    let mut old = (transform.single().translation().clone() / LATTICE_GRID_SIZE as f32).round()
         * LATTICE_GRID_SIZE as f32;
     // old.x = old.x.round();
     // old.z = old.z.round();
@@ -113,6 +125,8 @@ pub fn setup_terrain_loader(
     mut terrain_material_data_holder: ResMut<TerrainMaterialDataHolder>,
     render_device: ResMut<RenderDevice>,
     render_queue: ResMut<RenderQueue>,
+    server_request_sender: ResMut<ServerRequestSender>,
+    terrain_response_receiver: ResMut<TerrainResponseReceiver>,
 ) {
     let (handle, material) = terrain_material.iter_mut().next().unwrap();
     // setup the shader verts!
@@ -138,16 +152,14 @@ pub fn setup_terrain_loader(
     let (tx, rx) = bounded::<TerrainDataUpdate>(5);
     let transform = Arc::clone(&transform.0);
 
+    let socket = server_request_sender.0.clone();
+    let terrain_res_rec = terrain_response_receiver.0.clone();
+
     // we just use this once, and it lives ~forever~ (spooky)
     let mut map = terrain_data_map.clone();
     let mesh_verts = terrain_data_map.mesh.terrain_mesh_verts.clone();
     commands.insert_resource::<TerrainUpdateProcHandle>(TerrainUpdateProcHandle(
         runtime.spawn_background_task(|_ctx| async move {
-            // now fetch from the server!
-            let (mut socket, other) =
-                connect_async(Url::parse("ws://127.0.0.1:9002").expect("Can't connect to URL"))
-                    .await
-                    .unwrap();
             loop {
                 // update the center
                 {
@@ -176,16 +188,11 @@ pub fn setup_terrain_loader(
                         || (i == mesh_verts.len() - 1 && to_fetch.len() > 0)
                     {
                         total += to_fetch.len();
-                        // println!("Sending req for {}", to_fetch.len());
+                        println!("Sending req for {} {total}", to_fetch.len());
                         map.mark_requested(&mut to_fetch);
                         socket
-                            .send(Binary(
-                                to_stdvec(&MazeNetworkRequest::ReqTerrainHeights(to_fetch.clone()))
-                                    .unwrap(),
-                            ))
-                            .await
+                            .send(MazeNetworkRequest::ReqTerrainHeights(to_fetch.clone()))
                             .expect("TODO: panic message");
-                        // now clear and restart
                         to_fetch.clear();
                     }
                 }
@@ -195,24 +202,14 @@ pub fn setup_terrain_loader(
                 }
 
                 while total > 0 {
-                    match socket.next().await.unwrap() {
-                        Ok(msg) => {
-                            if let Binary(bin) = msg {
-                                let fetched = from_bytes::<MazeNetworkResponse>(&bin).unwrap();
-                                if let TerrainHeights(fetched) = fetched {
-                                    map.fill_in_data(&fetched);
-                                    println!(
-                                        "Filled in {}, remaining {}",
-                                        fetched.len(),
-                                        total - fetched.len()
-                                    );
-                                    total -= fetched.len();
-                                }
-                            }
-                        }
-                        Err(_) => {
-                            // do nothing
-                        }
+                    if let Some(fetched) = terrain_res_rec.iter().next() {
+                        map.fill_in_data(&fetched);
+                        println!(
+                            "Filled in {}, remaining {}",
+                            fetched.len(),
+                            total - fetched.len()
+                        );
+                        total -= fetched.len();
                     }
                 }
 
@@ -457,295 +454,5 @@ pub fn stream_terrain_mesh(
             .clone();
 
         // material.triangle_indices = update.guesses;
-    }
-}
-
-#[derive(Clone)]
-pub struct TerrainDataHolder {
-    /// The actual data we have on hand
-    /// The amount of data is length 2N. The last N elements are dedicated to elements
-    /// that have we have not fetched yet
-    data: Vec<TerrainDataPoint>,
-    /// The locator lets us find which point in the terrain data we are closest to quickly
-    /// This also includes unresolved data
-    locator: KdTree<f32, u64, 2, 256, u32>,
-    /// This is the list of eviction candidates from best to worst
-    /// It is sorted by the candidates' ratio of actual distance to ideal distance
-    eviction_priority: Vec<(usize, f32)>,
-}
-
-#[derive(Clone)]
-pub struct TerrainMeshHolder {
-    /// An unordered list of vertices in the mesh
-    terrain_mesh_verts: Vec<[f32; 2]>,
-    /// The reverse locator lets us find which point in the terrain MESH we are closest to quickly
-    reverse_locator: KdTree<f32, u64, 2, 256, u32>,
-    /// Center of the terrain mesh
-    center: Vec2,
-    /// The radius of acceptance for each vertex in terrain_mesh_verts
-    check_radii: Vec<f32>,
-}
-
-#[derive(Resource, Clone)]
-pub struct TerrainDataMap {
-    initialized: bool,
-    resolved_data: TerrainDataHolder,
-    unresolved_data: TerrainDataHolder,
-    mesh: TerrainMeshHolder,
-}
-
-/// How much the nodes are rounded by
-const ACCURACY: f32 = 0.25;
-
-impl TerrainDataHolder {
-    /// Partially sort the priorities by the first n highest
-    pub fn select_highest_priorities(&mut self, mesh: &TerrainMeshHolder, n_highest: usize) {
-        for (i, data) in (&self.data).into_iter().enumerate() {
-            if data.coordinates[0].is_infinite() || data.coordinates[1].is_infinite() {
-                self.eviction_priority[i] = (i, f32::INFINITY);
-            } else {
-                // correct for coordinate being in world space, we want it relative to the mesh
-                let nearest = mesh.reverse_locator.nearest_one::<SquaredEuclidean>(&[
-                    data.coordinates[0] - mesh.center.x,
-                    data.coordinates[1] - mesh.center.y,
-                ]);
-                let required_dist = mesh.get_check_radius(nearest.item as usize);
-                self.eviction_priority[i] = (i, nearest.distance / required_dist);
-            }
-        }
-        self.eviction_priority
-            .select_nth_unstable_by(n_highest - 1, |a, b| b.1.total_cmp(&a.1));
-    }
-}
-
-impl TerrainMeshHolder {
-    /// Get the radius of acceptable data for a particular vertex in the terrain mesh
-    pub fn get_check_radius(&self, vertex_idx: usize) -> f32 {
-        return self.check_radii[vertex_idx];
-    }
-}
-
-impl TerrainDataMap {
-    pub fn new(terrain_lattice: &Vec<DVec2>) -> Self {
-        return TerrainDataMap::new_with_capacity(terrain_lattice, MAX_VERTICES);
-    }
-
-    pub fn new_with_capacity(terrain_lattice: &Vec<DVec2>, capacity: usize) -> Self {
-        let lattice_data: Vec<[f32; 2]> = terrain_lattice
-            .into_iter()
-            .map(|e| e.as_vec2().to_array())
-            .collect();
-        let holder = TerrainDataHolder {
-            data: vec![
-                TerrainDataPoint {
-                    coordinates: [f32::INFINITY, f32::INFINITY],
-                    height: 0.0,
-                    idx: 0,
-                    gradient: [0., 0.]
-                };
-                capacity
-            ],
-            locator: Default::default(),
-            eviction_priority: Vec::from_iter(
-                vec![f32::INFINITY; capacity].into_iter().enumerate(),
-            ),
-        };
-        let check_radii = terrain_lattice
-            .into_iter()
-            .map(|e| (DATA_TOLERANCE * e.length()) as f32)
-            .collect();
-        return TerrainDataMap {
-            initialized: false,
-            resolved_data: holder.clone(),
-            unresolved_data: holder,
-            mesh: TerrainMeshHolder {
-                reverse_locator: KdTree::<f32, u64, 2, 256, u32>::from(&lattice_data),
-                terrain_mesh_verts: lattice_data,
-                center: Vec2::ZERO,
-                check_radii,
-            },
-        };
-    }
-
-    /// Mark these vertices as requested data
-    /// We potentially evict other requested data before it's been filled in
-    pub fn mark_requested(&mut self, data: &mut Vec<TerrainDataPoint>) {
-        // add it to the locator to mark it as part of the useful data
-        self.unresolved_data
-            .select_highest_priorities(&self.mesh, data.len());
-        for (i, datum) in data.into_iter().enumerate() {
-            // evict any old unresolved data
-            let (evicting, _) = self.unresolved_data.eviction_priority[i];
-            let old_data = &self.unresolved_data.data[evicting];
-            self.unresolved_data
-                .locator
-                .remove(&old_data.coordinates, evicting as u64);
-            datum.idx = evicting;
-            self.unresolved_data.data[evicting] = datum.clone();
-            self.unresolved_data
-                .locator
-                .add(&datum.coordinates, datum.idx as u64);
-        }
-    }
-
-    pub fn fill_in_data(&mut self, data: &Vec<TerrainDataPoint>) -> bool {
-        // first check the requested data and make sure this point still exists
-        let data = data
-            .iter()
-            .filter(|new_data| {
-                let old_data = &mut self.unresolved_data.data[new_data.idx];
-                return old_data.coordinates[0] == new_data.coordinates[0]
-                    && old_data.coordinates[1] == new_data.coordinates[1];
-            })
-            .collect_vec();
-        // prioritize for replacement
-        self.resolved_data
-            .select_highest_priorities(&self.mesh, data.len());
-        let empty = data.is_empty();
-        // finally replace
-        for (i, new_data) in data.into_iter().enumerate() {
-            // first check the requested data and make sure this point still exists
-            let mut old_unresolved = &mut self.unresolved_data.data[new_data.idx];
-            // it does match, so remove this unresolved data
-            self.unresolved_data
-                .locator
-                .remove(&old_unresolved.coordinates, old_unresolved.idx as u64);
-            old_unresolved.coordinates = [f32::INFINITY, f32::INFINITY];
-
-            // now replace the resolved data
-            let (evicting, _) = self.resolved_data.eviction_priority[i];
-            // println!(
-            //     "Filling in {:?}, evicting {}",
-            //     new_data.coordinates, evicting
-            // );
-            let old_resolved = &mut self.resolved_data.data[evicting];
-            self.resolved_data
-                .locator
-                .remove(&old_resolved.coordinates, old_resolved.idx as u64);
-            old_resolved.coordinates = new_data.coordinates;
-            old_resolved.height = new_data.height;
-            old_resolved.gradient = new_data.gradient;
-            old_resolved.idx = evicting;
-            self.resolved_data
-                .locator
-                .add(&old_resolved.coordinates, old_resolved.idx as u64);
-        }
-
-        return !empty;
-    }
-
-    /// Checks whether the terrain data is still acceptable to interpolate the specified point
-    /// Data further from the camera has a higher tolerance for being off
-    pub fn vert_to_fetch(&self, vertex_idx: usize) -> Option<[f32; 2]> {
-        let mut vertex = self.mesh.terrain_mesh_verts[vertex_idx];
-        vertex[0] += self.mesh.center.x;
-        vertex[1] += self.mesh.center.y;
-        // we check if the nearest guy is in the acceptable range
-        let nearest = self
-            .resolved_data
-            .locator
-            .nearest_one::<SquaredEuclidean>(&vertex);
-        let unresolved_nearest = self
-            .unresolved_data
-            .locator
-            .nearest_one::<SquaredEuclidean>(&vertex);
-        if nearest.distance.min(unresolved_nearest.distance)
-            > self.mesh.get_check_radius(vertex_idx)
-        {
-            return Some(vertex);
-        }
-        return None;
-    }
-}
-
-#[test]
-fn fill_in_when_full_test() {
-    let mut rng = StdRng::seed_from_u64(1);
-    const MESH_VERTS: usize = 80;
-    const TERRAIN_VERTS: usize = MESH_VERTS * 5 / 2;
-    let lattice = create_base_lattice_with_verts(MESH_VERTS as f64);
-    let mesh_verts = lattice.len();
-    let mut map = TerrainDataMap::new_with_capacity(&lattice, TERRAIN_VERTS);
-    // completely fill up the map
-    let mut data = Vec::<TerrainDataPoint>::with_capacity(TERRAIN_VERTS);
-    for _ in 0..TERRAIN_VERTS {
-        data.push(TerrainDataPoint {
-            coordinates: [
-                rng.gen_range(-X_VIEW_DIST_M..X_VIEW_DIST_M) as f32,
-                rng.gen_range(-Z_VIEW_DIST_M..Z_VIEW_DIST_M) as f32,
-            ],
-            height: 0.,
-            gradient: [0., 0.],
-            idx: 0,
-        });
-    }
-    map.mark_requested(&mut data);
-    map.fill_in_data(&data);
-
-    // now try to add new data multiple times
-    for _ in 0..100 {
-        // set a mew center
-        map.mesh.center = Vec2::new(
-            rng.gen_range(-10000.0..10000.0),
-            rng.gen_range(-10000.0..10000.0),
-        );
-        const BATCH_SIZE: usize = 10;
-        let mut total = 0;
-        let mut batches = Vec::<Vec<TerrainDataPoint>>::with_capacity(BATCH_SIZE);
-        let mut to_fetch = Vec::<TerrainDataPoint>::with_capacity(BATCH_SIZE);
-        for i in 0..mesh_verts {
-            if let Some(vert) = map.vert_to_fetch(i) {
-                println!("- - - -Fetching {} {:?}", i, vert);
-                to_fetch.push(TerrainDataPoint {
-                    coordinates: vert,
-                    height: 0.,
-                    idx: 0,
-                    gradient: [0., 0.],
-                });
-            }
-
-            // send off a load and mark requested
-            // we do this so the server can start fetching data for us
-            if to_fetch.len() >= BATCH_SIZE || (i == mesh_verts - 1 && to_fetch.len() > 0) {
-                total += to_fetch.len();
-                // println!("Sending req for {}", to_fetch.len());
-                map.mark_requested(&mut to_fetch);
-                batches.push(to_fetch.clone());
-                // now clear and restart
-                to_fetch.clear();
-            }
-        }
-
-        while total > 0 {
-            let fetched = batches.pop().unwrap();
-            map.fill_in_data(&fetched);
-            println!(
-                "Filled in {}, remaining {}",
-                fetched.len(),
-                total - fetched.len()
-            );
-            total -= fetched.len();
-        }
-
-        let center = [map.mesh.center.x, map.mesh.center.y];
-
-        // now check that all these guys are in there
-        for i in 0..map.mesh.terrain_mesh_verts.len() {
-            let mut v = map.mesh.terrain_mesh_verts[i];
-            v[0] += center[0];
-            v[1] += center[1];
-            let dist = map
-                .resolved_data
-                .locator
-                .nearest_one::<SquaredEuclidean>(&v);
-            println!(
-                "Checking {} {:?} D {} CR {}",
-                i,
-                v,
-                dist.distance,
-                map.mesh.get_check_radius(i)
-            );
-            assert!(dist.distance < map.mesh.get_check_radius(i));
-        }
     }
 }

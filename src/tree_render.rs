@@ -5,6 +5,7 @@ use bevy::render::mesh::{Indices, PrimitiveTopology};
 use rand::rngs::ThreadRng;
 use rand::{thread_rng, Rng};
 use std::f64::consts::PI;
+use bevy::utils::default;
 
 const TREE_MIN_HEIGHT: f64 = 10.;
 const TREE_MAX_HEIGHT: f64 = 30.;
@@ -171,11 +172,11 @@ pub fn get_tree_mesh(seed: i32) -> Mesh {
     let normals: Vec<_> = vertices.iter().map(|(_, n, _)| *n).collect();
     let uvs: Vec<_> = vertices.iter().map(|(_, _, uv)| *uv).collect();
 
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, default());
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-    mesh.set_indices(Some(Indices::U32(indices)));
+    mesh.insert_indices(Indices::U32(indices));
     // mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
     return mesh;
 }

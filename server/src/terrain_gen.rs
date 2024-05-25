@@ -70,7 +70,7 @@ impl TerrainGenerator {
         let z = y * scale;
 
         let freq0 = 0.00003f64;
-        let freq1 = 0.002f64;
+        let freq1 = 0.0010f64;
         let freq2 = 12.0 * freq1 * 2.0;
         let freq3 = freq2;
 

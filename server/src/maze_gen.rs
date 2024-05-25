@@ -273,7 +273,7 @@ fn next_i64_tuple(file: &mut File, mut buf: [u8; 8]) -> (i64, i64) {
 
 /// This is an extension to the UnGraphMap that we use to store possible edges
 /// when we are populating the maze
-trait GetRandomNode<N: NodeTrait, E: Clone> {
+pub trait GetRandomNode<N: NodeTrait, E: Clone> {
     fn pop_random_edge(&mut self, neighbor_of: Option<N>) -> Option<(N, N)>;
     // TODO: remove the `weight` param, not sure how yet
     fn add_possible_edges_of_component<M: Maze<N>>(
@@ -369,6 +369,77 @@ impl<N: NodeTrait, E: Clone> GetRandomNode<N, E> for UnGraphMap<N, E> {
     }
 }
 
+pub fn add_next_edge<N: NodeTrait, M: Maze<N>>(
+    graph: &M,
+    starting_components: &mut Vec<MazeComponent<N>>,
+    mut new_edge: (N, N),
+    possible_edges: &mut UnGraphMap<N, bool>,
+    last_sink: &mut Option<N>,
+) where
+    M: Maze<N>,
+{
+    // find the source and sink comps
+    // the source comp needs to be a real component
+    let source_comp_index = starting_components
+        .iter_mut()
+        .position(|c| c.contains_node(new_edge.0) || c.contains_node(new_edge.1))
+        .unwrap();
+    // swap the two because the rest of the code assumes that source_comp contains new_edge.0
+    if !starting_components[source_comp_index].contains_node(new_edge.0) {
+        new_edge = (new_edge.1, new_edge.0);
+    }
+    // first merge the two components (if the sink component exists)
+    if let Some(sink_comp_index) = starting_components
+        .iter()
+        .position(|c| c.contains_node(new_edge.1))
+        .clone()
+    {
+        let edges: Vec<_> = starting_components[sink_comp_index]
+            .all_edges()
+            .map(|(x, y, b)| (x, y, *b))
+            .collect();
+        // merge the components, ignoring edgeless nodes
+        for edge in edges {
+            starting_components[source_comp_index].add_edge(edge.0, edge.1, edge.2);
+        }
+        // now remove the sink component
+        starting_components.remove(sink_comp_index);
+    }
+    // now we add the edge and check for new edges
+    let source_comp_index = starting_components
+        .iter_mut()
+        .position(|c| c.contains_node(new_edge.0))
+        .unwrap();
+    let source_comp = &mut starting_components[source_comp_index];
+
+    // we add the edge
+    source_comp.add_edge(new_edge.0, new_edge.1, true);
+
+    // finally update the possible edges
+    // remove any possible edges that are no longer valid
+    possible_edges.clean_edges_of_component(source_comp);
+    // now search for new possible edges
+    // we only have to look at the component we modified
+    possible_edges.add_possible_edges_of_component(graph, source_comp, true);
+
+    // finally finally set the last sink so we can continue on and create a meandering path
+    *last_sink = Some(new_edge.1);
+}
+
+pub fn init_possible_edges<N: NodeTrait, M: Maze<N>>(
+    graph: &M,
+    starting_components: &Vec<MazeComponent<N>>,
+) -> UnGraphMap<N, bool>
+where
+    M: Maze<N>,
+{
+    let mut possible_edges: UnGraphMap<N, bool> = UnGraphMap::new();
+    for component in starting_components {
+        possible_edges.add_possible_edges_of_component(graph, component, true);
+    }
+    possible_edges
+}
+
 /// Generate a maze graph
 /// The procedure is to connect and combine the components until we are left with a single
 /// one. This single one will be the maze itself.
@@ -380,58 +451,16 @@ where
     M: Maze<N>,
 {
     // generate a list of possible edges
-    let mut possible_edges: UnGraphMap<N, bool> = UnGraphMap::new();
-    for component in &starting_components {
-        possible_edges.add_possible_edges_of_component(graph, component, true);
-    }
+    let mut possible_edges = init_possible_edges(graph, &mut starting_components);
     let mut last_sink: Option<N> = None;
-    while let Some(mut new_edge) = possible_edges.pop_random_edge(last_sink) {
-        // find the source and sink comps
-        // the source comp needs to be a real component
-        let source_comp_index = starting_components
-            .iter_mut()
-            .position(|c| c.contains_node(new_edge.0) || c.contains_node(new_edge.1))
-            .unwrap();
-        // swap the two because the rest of the code assumes that source_comp contains new_edge.0
-        if !starting_components[source_comp_index].contains_node(new_edge.0) {
-            new_edge = (new_edge.1, new_edge.0);
-        }
-        // first merge the two components (if the sink component exists)
-        if let Some(sink_comp_index) = starting_components
-            .iter()
-            .position(|c| c.contains_node(new_edge.1))
-            .clone()
-        {
-            let edges: Vec<_> = starting_components[sink_comp_index]
-                .all_edges()
-                .map(|(x, y, b)| (x, y, *b))
-                .collect();
-            // merge the components, ignoring edgeless nodes
-            for edge in edges {
-                starting_components[source_comp_index].add_edge(edge.0, edge.1, edge.2);
-            }
-            // now remove the sink component
-            starting_components.remove(sink_comp_index);
-        }
-        // now we add the edge and check for new edges
-        let source_comp_index = starting_components
-            .iter_mut()
-            .position(|c| c.contains_node(new_edge.0))
-            .unwrap();
-        let source_comp = &mut starting_components[source_comp_index];
-
-        // we add the edge
-        source_comp.add_edge(new_edge.0, new_edge.1, true);
-
-        // finally update the possible edges
-        // remove any possible edges that are no longer valid
-        possible_edges.clean_edges_of_component(source_comp);
-        // now search for new possible edges
-        // we only have to look at the component we modified
-        possible_edges.add_possible_edges_of_component(graph, source_comp, true);
-
-        // finally finally set the last sink so we can continue on and create a meandering path
-        last_sink = Some(new_edge.1);
+    while let Some(new_edge) = possible_edges.pop_random_edge(last_sink) {
+        add_next_edge(
+            graph,
+            &mut starting_components,
+            new_edge,
+            &mut possible_edges,
+            &mut last_sink,
+        );
     }
     graph.set_maze(starting_components.pop().unwrap());
     return graph;

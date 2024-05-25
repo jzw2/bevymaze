@@ -38,7 +38,7 @@ fn murmurHash12(inp: vec2<u32>) -> u32 {
     var src = inp;
     let M: u32 = 0x5bd1e995u;
     var h: u32 = 1190494759u;
-    src *= M; src ^= src >> 24u; src *= M;
+    src *= M; src.x ^= src.x >> 24u; src.y ^= src.y >> 24u; /*src ^= src >> 24u;*/ src *= M;
     h *= M; h ^= src.x; h *= M; h ^= src.y;
     h ^= h >> 13u; h *= M; h ^= h >> 15u;
     return h;
@@ -48,6 +48,10 @@ fn murmurHash12(inp: vec2<u32>) -> u32 {
 fn hash12(src: vec2<f32>) -> f32 {
     let h = murmurHash12(bitcast<u32>(src));
     return bitcast<f32>(h & 0x007fffffu | 0x3f800000u) - 1.0;
+}
+
+fn pos_rem_vec(n: vec2<f32>, m: f32) -> vec2<f32> {
+    return ((n % m) + m) % m;
 }
 
 fn positive_rem(n: f32, m: f32) -> f32 {

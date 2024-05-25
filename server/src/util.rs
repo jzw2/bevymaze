@@ -1,4 +1,6 @@
 use std::f64::consts::PI;
+use std::ops::Range;
+use bevy::math::DVec2;
 
 pub fn lin_map(a: f64, b: f64, c: f64, d: f64, x: f64) -> f64 {
     return (d - c) / (b - a) * (x - a) + c;
@@ -7,6 +9,10 @@ pub fn lin_map(a: f64, b: f64, c: f64, d: f64, x: f64) -> f64 {
 pub fn lin_map32(a: f32, b: f32, c: f32, d: f32, x: f32) -> f32 {
     return (d - c) / (b - a) * (x - a) + c;
 }
+
+// pub fn lin_map_range<Idx: Num>(domain: Range<Idx>, range: Range<Idx>, x: Idx) -> Idx {
+//     return (range.end - range.start) / (domain.end - domain.start) * (x - domain.start) + range.start;
+// }
 
 /// A smooth approximation to the maximum function
 /// Using the formula here https://en.wikipedia.org/wiki/Smooth_maximum#Smooth_maximum_unit
@@ -26,29 +32,19 @@ pub fn derivative_y(function: impl Fn(f64, f64) -> f64) -> impl Fn(f64, f64) -> 
 }
 
 /// Convert a polar coordinate to it's cartesian counterpart
-pub fn polar_to_cart(p: (f64, f64)) -> (f64, f64) {
-    return (p.0 * p.1.cos(), p.0 * p.1.sin());
-}
-
-/// Get the distance between two points
-pub fn dist(p1: (f64, f64), p2: (f64, f64)) -> f64 {
-    return origin_dist((p1.0 - p2.0, p1.1 - p2.1));
-}
-
-/// Get the distance between a point and the origin
-pub fn origin_dist(p: (f64, f64)) -> f64 {
-    return (p.0 * p.0 + p.1 * p.1).sqrt();
+pub fn polar_to_cart(p: DVec2) -> DVec2 {
+    return DVec2::new(p.x * p.y.cos(), p.x * p.y.sin());
 }
 
 /// Get the angle that the segment between the origin and p makes with the x-axis
 /// Return value is in range from [0, 2pi)
-pub fn polar_angle(p: (f64, f64)) -> f64 {
-    return (p.1.atan2(p.0) + (2.0 * PI)).rem_euclid(2.0 * PI);
+pub fn polar_angle(p: DVec2) -> f64 {
+    return (p.x.atan2(p.y) + (2.0 * PI)).rem_euclid(2.0 * PI);
 }
 
 /// Convert a cartesian coordinate to polar
-pub fn cart_to_polar(p: (f64, f64)) -> (f64, f64) {
-    return (origin_dist(p), polar_angle(p));
+pub fn cart_to_polar(p: DVec2) -> DVec2 {
+    return DVec2::new(p.length(), polar_angle(p));
 }
 
 #[inline]

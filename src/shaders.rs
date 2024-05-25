@@ -1,17 +1,16 @@
-use crate::maze_loader::MazeData;
+use crate::maze_loader::{MAZE_COMPONENTS_X, RawMazeData};
 use crate::terrain_render::TERRAIN_VERTICES;
 use bevy::asset::{load_internal_asset, Asset};
 use bevy::core_pipeline::core_3d;
-use bevy::core_pipeline::core_3d::graph::node::START_MAIN_PASS;
+use bevy::core_pipeline::core_3d::graph::Node3d;
 use bevy::pbr::{ExtendedMaterial, ExtractedMaterials, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline, MaterialPipeline, MaterialPipelineKey, PrepassPipeline, RenderMaterials};
 use bevy::prelude::*;
-use bevy::reflect::TypeUuid;
 use bevy::render::extract_component::{ExtractComponent, ExtractComponentPlugin};
 use bevy::render::extract_instances::ExtractedInstances;
 use bevy::render::extract_resource::ExtractResourcePlugin;
 use bevy::render::mesh::MeshVertexBufferLayout;
 use bevy::render::render_asset::RenderAssets;
-use bevy::render::render_graph::{RenderGraph, RenderGraphApp, ViewNodeRunner};
+use bevy::render::render_graph::{RenderGraph, RenderGraphApp, RenderLabel, ViewNodeRunner};
 use bevy::render::render_resource::{
     encase, AsBindGroup, AsBindGroupError, BindGroup, BindGroupDescriptor, BindGroupEntry,
     BindGroupLayout, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingResource, BindingType,
@@ -30,7 +29,10 @@ use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::rc::Rc;
 use std::sync::Arc;
+use bevy::core_pipeline::core_3d::graph::Node3d::StartMainPass;
 use bevy::render::render_resource::Face::Back;
+use bevy::render::render_resource::ShaderDefVal::UInt;
+use server::square_maze_gen::{SQUARE_MAZE_CELL_COUNT, SQUARE_MAZE_CELL_SIZE};
 // use bevy::render::RenderApp;
 // use bevy::render::renderer::{RenderAdapter, RenderDevice};
 
@@ -79,8 +81,7 @@ impl TerrainMaterialDataHolder {
     }
 }
 
-#[derive(Asset, TypePath, TypeUuid, AsBindGroup, Debug, Clone)]
-#[uuid = "b62bb455-a72c-4b56-87bb-81e0554e234f"]
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 pub struct TerrainMaterial {
     #[uniform(0)]
     pub max_height: f32,
@@ -156,8 +157,7 @@ impl Material for TerrainMaterial {
     }
 }
 
-#[derive(Asset, TypePath, TypeUuid, AsBindGroup, Debug, Clone)]
-#[uuid = "b62bb455-a72c-4b56-87bb-81e0554e234b"]
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 pub struct GrassLayerMaterial {
     #[uniform(23)]
     pub layer_height: f32,
@@ -171,15 +171,24 @@ impl MaterialExtension for GrassLayerMaterial {
     fn fragment_shader() -> ShaderRef {
         "shaders/grass_color.wgsl".into()
     }
+
+    fn specialize(
+        _pipeline: &MaterialExtensionPipeline,
+        descriptor: &mut RenderPipelineDescriptor,
+        _layout: &MeshVertexBufferLayout,
+        _key: MaterialExtensionKey<Self>,
+    ) -> Result<(), SpecializedMeshPipelineError> {
+        descriptor.primitive.cull_mode = Some(Back);
+        return Ok(());
+    }
 }
 
 #[derive(Resource)]
 pub struct MazeLayerMaterialDataHolder {
-    pub(crate) raw_maze_data: StorageBuffer<MazeData>,
+    pub(crate) raw_maze_data: StorageBuffer<RawMazeData>,
 }
 
-#[derive(Asset, TypePath, TypeUuid, AsBindGroup, Debug, Clone)]
-#[uuid = "b62bb455-a72c-4b56-87bb-81e0554e234b"]
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 pub struct MazeLayerMaterial {
     #[uniform(23)]
     pub layer_height: f32,
@@ -207,6 +216,12 @@ impl MaterialExtension for MazeLayerMaterial {
         _key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
         descriptor.primitive.cull_mode = None;
+        if let Some(mut frag_state) = descriptor.fragment.clone() {
+            frag_state.shader_defs.push(UInt("COMPONENT_CELLS_DEF__".to_string(), SQUARE_MAZE_CELL_COUNT as u32));
+            frag_state.shader_defs.push(UInt("PATH_WIDTH_DEF__".to_string(), SQUARE_MAZE_CELL_SIZE as u32));
+            frag_state.shader_defs.push(UInt("MAZE_COMPONENTS_DEF__".to_string(), MAZE_COMPONENTS_X as u32));
+            descriptor.fragment = Some(frag_state);
+        }
         return Ok(());
     }
 }
@@ -237,12 +252,12 @@ impl Plugin for TerrainPlugin {
 
         render_app
             .add_render_graph_node::<UpdateTerrainVertexHeightsNode>(
-                core_3d::graph::NAME,
-                UPDATE_TERRAIN_VERTEX_HEIGHTS_NODE_NAME,
+                core_3d::graph::Core3d,
+                UpdateTerrainVertexHeightsLabel
             )
             .add_render_graph_edges(
-                core_3d::graph::NAME,
-                &[UPDATE_TERRAIN_VERTEX_HEIGHTS_NODE_NAME, START_MAIN_PASS],
+                core_3d::graph::Core3d,
+                (UpdateTerrainVertexHeightsLabel, StartMainPass),
             );
     }
 
@@ -319,13 +334,14 @@ impl FromWorld for UpdateTerrainHeightsPipeline {
     }
 }
 
+#[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
+struct UpdateTerrainVertexHeightsLabel;
+
 enum UpdateTerrainVertexHeightsState {
     Loading,
     Init,
     Update,
 }
-
-const UPDATE_TERRAIN_VERTEX_HEIGHTS_NODE_NAME: &str = "update_terrain_heights";
 
 struct UpdateTerrainVertexHeightsNode {
     state: UpdateTerrainVertexHeightsState,

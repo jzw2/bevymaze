@@ -2,7 +2,7 @@
 #import bevy_pbr::mesh_bindings       mesh
 #import bevy_pbr::mesh_view_bindings
 //#import bevy_pbr::mesh_vertex_output  MeshVertexOutput
-#import bevymaze::util::{lin_map, hash11, murmurHash11}
+#import bevymaze::util::{lin_map, hash11, hash12, murmurHash11}
 #import bevymaze::curvature_mesh_vertex_output  CuravtureMeshVertexOutput
 
 #import bevy_pbr::mesh_functions
@@ -60,37 +60,37 @@ struct Vertex {
 
 const max_u32: u32 = 4294967295u;
 
-@group(1) @binding(10)
+@group(2) @binding(10)
 var<uniform> u_bound: f32;
-@group(1) @binding(11)
+@group(2) @binding(11)
 var<uniform> v_bound: f32;
 
 /// len is MAX_TRIANGLES * 3
-@group(1) @binding(15)
+@group(2) @binding(15)
 var<storage, read> triangles: array<u32>;
 
 /// len is MAX_TRIANGLES * 3
-@group(1) @binding(16)
+@group(2) @binding(16)
 var<storage, read> halfedges: array<u32>;
 
 /// len is 2 * MAX_VERTICES
-@group(1) @binding(17)
+@group(2) @binding(17)
 var<storage, read> vertices: array<f32>;
 
 /// len is MAX_VERTICES
-@group(1) @binding(18)
+@group(2) @binding(18)
 var<storage, read> height: array<f32>;
 
 /// len is 2 * MAX_VERTICES
-@group(1) @binding(19)
+@group(2) @binding(19)
 var<storage, read> gradients: array<f32>;
 
 /// len is TERRAIN_VERTICES
-@group(1) @binding(20)
+@group(2) @binding(20)
 var<storage, read_write> triangle_indices: array<u32>;
 
 /// len is TERRAIN_VERTICES
-@group(1) @binding(23)
+@group(2) @binding(23)
 var<uniform> layer_height: f32;
 
 // Copied and adapted from https://gamedev.stackexchange.com/a/23745
@@ -158,6 +158,7 @@ fn vertex(vertex_no_morph: Vertex) -> CuravtureMeshVertexOutput {
 #endif
     out.world_position = bevy_pbr::mesh_functions::mesh_position_local_to_world(model, vec4<f32>(vertex.position, 1.0));
 
+    let l_norm_height = layer_height / 2.0f;
     let found = triangle_indices[vertex.vertex_index];
     if found != max_u32 {
         let tri = 3u * (found / 3u);
@@ -168,13 +169,19 @@ fn vertex(vertex_no_morph: Vertex) -> CuravtureMeshVertexOutput {
         let b = vec2<f32>(vertices[bi], vertices[bi + 1u]);
         let c = vec2<f32>(vertices[ci], vertices[ci + 1u]);
         let bary = barycentric(out.world_position.xz, a, b, c);
-        let height_hash = hash11(layer_height);
-        let height_hash2 = hash11(layer_height + 1.0);
-        let height_hash3 = hash11(layer_height + 2.0);
-        let perturbance = sin(3.0 * (height_hash * out.world_position.xz + 2.0) + vec2<f32>(height_hash2, height_hash3));
+//        let height_hash = hash11(layer_height) - 0.5;
+//        let height_hash2 = hash11(layer_height + 1.0) - 0.5;
+//        let height_hash3 = hash11(layer_height + 2.0) - 0.5;
+//        var perturbance
+//            = sin(6.0 * 3.0 / (1.0 + height_hash2) * out.world_position.x) + sin(6.0 * 3.0 / (1.0 + height_hash ) * out.world_position.z)
+//            + sin(6.0 * 3.0 / (2.0 + height_hash3) * out.world_position.x) + sin(6.0 * 3.0 / (2.0 + height_hash2) * out.world_position.z)
+//            + sin(6.0 * 3.0 / (3.0 + height_hash ) * out.world_position.x) + sin(6.0 * 3.0 / (3.0 + height_hash3) * out.world_position.z);
+//        perturbance /= 2.0 * 3.0;
+//        perturbance *= 0.5;
         out.world_position.y = interp(ai / 2u, bi / 2u, ci / 2u, bary.xy)
-            + layer_height
-            + 0.35 * (perturbance.x + perturbance.y) / 2.0;
+            + layer_height + (hash12(out.world_position.xz * layer_height) - 0.5) * 0.5
+            /*+ perturbance*/;
+            //+ 0.8 * l_norm_height * (perturbance.x + perturbance.y) / 2.0;
     } else {
         out.world_position.y = 0.0;
     }

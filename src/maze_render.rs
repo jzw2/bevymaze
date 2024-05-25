@@ -1,28 +1,31 @@
-use crate::render::{quad_cc_indices, quad_cw_indices, SimpleVertices};
-use bevy::math::{Vec2, Vec3};
-use bevy::prelude::{shape, Mesh};
+use bevy::math::{DVec2, Vec2, Vec3};
+use bevy::prelude::{default, Mesh};
 use bevy::render::mesh::{Indices, PrimitiveTopology};
+use bevy_rapier3d::geometry::Collider;
 use petgraph::graphmap::NodeTrait;
-use server::maze_gen::{CircleMaze, CircleNode};
+
 use server::square_maze_gen::{SquareMaze, SquareNode};
-use server::util::{cart_to_polar, dist, polar_angle, polar_to_cart};
-use std::f64::consts::PI;
+use server::util::{polar_angle, polar_to_cart};
+
+use crate::render::{quad_cc_indices, quad_cw_indices, SimpleVertices};
+
+pub const MAZE_HEIGHT: f32 = 2.0f32;
 
 /// A segment with endpoints p1 and p2
 pub struct Segment {
-    pub(crate) p1: (f64, f64),
-    pub(crate) p2: (f64, f64),
+    pub(crate) p1: DVec2,
+    pub(crate) p2: DVec2,
 }
 
 /// A circle with center and radius
 pub struct Circle {
-    pub(crate) center: (f64, f64),
+    pub(crate) center: DVec2,
     pub(crate) radius: f64,
 }
 
 /// An arc of a circle with starting and ending angles a1 and a2
 /// Should connect the angles counterclockwise
-pub struct Arc {
+pub struct CircleArc {
     pub(crate) circle: Circle,
     pub(crate) a1: f64,
     pub(crate) a2: f64,
@@ -33,35 +36,32 @@ pub trait GetWall<N: NodeTrait> {
     fn get_wall_geometry(&self, width: f32, height: f32) -> Vec<Mesh>;
 
     /// Determine if a point is in a wall
-    fn is_in_wall(&self, p: (f64, f64)) -> bool;
+    fn is_in_wall(&self, p: DVec2) -> bool;
 }
 
 /// Get the closest distance from a point to any point on a circle
-pub fn distance_to_circle(circle: &Circle, p: (f64, f64)) -> f64 {
-    let center_dist = dist(p, circle.center);
+pub fn distance_to_circle(circle: &Circle, p: DVec2) -> f64 {
+    let center_dist = p.distance(circle.center);
     return (circle.radius - center_dist).abs();
 }
 
 /// Get the closest distance from a point to any point on a segment
-pub fn distance_to_segment(segment: &Segment, p: (f64, f64)) -> f64 {
-    let v = (segment.p2.0 - segment.p1.0, segment.p2.1 - segment.p1.1);
-    let p_off = (p.0 - segment.p1.0, p.1 - segment.p1.1);
-    let t = (v.0 * p_off.0 + v.1 * p_off.1) / (v.0 * v.0 + v.1 * v.1);
+pub fn distance_to_segment(segment: &Segment, p: DVec2) -> f64 {
+    let v = segment.p2 - segment.p1;
+    let p_off = p - segment.p1;
+    let t = (v.x * p_off.x + v.y * p_off.y) / (v.x * v.x + v.y * v.y);
     // clamp the projection
-    let t = 0.0f64.max(1.0f64.min(t));
+    let t = t.clamp(0., 1.);
     // now get the dist
-    let seg_p = (
-        p.0 - (t * v.0 + segment.p1.0),
-        p.1 - (t * v.1 + segment.p1.1),
-    );
-    return (seg_p.0 * seg_p.0 + seg_p.1 * seg_p.1).sqrt();
+    let seg_p = p - (t * v + segment.p1);
+    return seg_p.length();
 }
 
 /// Get the mesh of a segment. The corners are listed clockwise.
 pub fn get_segment_mesh(segment: &Segment, width: f32, height: f32) -> Mesh {
     // get the vector perpendicular to <p2-p1>
-    let vp1 = Vec2::from((segment.p1.0 as f32, segment.p1.1 as f32));
-    let vp2 = Vec2::from((segment.p2.0 as f32, segment.p2.1 as f32));
+    let vp1 = segment.p1.as_vec2();
+    let vp2 = segment.p2.as_vec2();
     let vp = vp2 - vp1;
     let vp_len = vp.length();
 
@@ -161,17 +161,17 @@ pub fn get_segment_mesh(segment: &Segment, width: f32, height: f32) -> Mesh {
     let normals: Vec<_> = vertices.iter().map(|(_, n, _)| *n).collect();
     let uvs: Vec<_> = vertices.iter().map(|(_, _, uv)| *uv).collect();
 
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, default());
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-    mesh.set_indices(Some(Indices::U32(indices)));
+    mesh.insert_indices(Indices::U32(indices));
     return mesh;
 }
 
 /// get the closest distance from a point to any point on an arc
-pub fn distance_to_arc(arc: &Arc, p: (f64, f64)) -> f64 {
-    let p = (p.0 - arc.circle.center.0, p.1 - arc.circle.center.1);
+pub fn distance_to_arc(arc: &CircleArc, p: DVec2) -> f64 {
+    let p = p - arc.circle.center;
     let p_angle = polar_angle(p);
     if arc.a1 > arc.a2 {
         if p_angle > arc.a1 || p_angle < arc.a2 {
@@ -182,15 +182,15 @@ pub fn distance_to_arc(arc: &Arc, p: (f64, f64)) -> f64 {
             return distance_to_circle(&arc.circle, p);
         }
     }
-    let a1_p = polar_to_cart((arc.circle.radius, arc.a1));
-    let a2_p = polar_to_cart((arc.circle.radius, arc.a2));
+    let a1_p = polar_to_cart(DVec2::new(arc.circle.radius, arc.a1));
+    let a2_p = polar_to_cart(DVec2::new(arc.circle.radius, arc.a2));
 
-    return dist(a1_p, p).min(dist(a2_p, p));
+    return a1_p.distance(p).min(a2_p.distance(p));
 }
 
 /// Get an "extrusion mesh" of an arc, with the curve on the x-z plane
 /// `divisions` is how many points between `a1` and `a2` to include
-pub fn get_arc_mesh(arc: &Arc, width: f32, height: f32, divisions: u32) -> Mesh {
+pub fn get_arc_mesh(arc: &CircleArc, width: f32, height: f32, divisions: u32) -> Mesh {
     let divisions = divisions + 2;
 
     // simple vertex positions
@@ -201,50 +201,38 @@ pub fn get_arc_mesh(arc: &Arc, width: f32, height: f32, divisions: u32) -> Mesh 
         // we are parametrically walking around the arc, sampling points
         let t = (i as f64) / (divisions as f64 - 1.0);
         // inner points are the points closest to the center
-        let inner_point = polar_to_cart((
+        let inner_point = polar_to_cart(DVec2::new(
             arc.circle.radius - width as f64,
             (arc.a2 - arc.a1) * t + arc.a1,
         ));
         // outer points are the points furthest from the center
-        let outer_point = polar_to_cart((
+        let outer_point = polar_to_cart(DVec2::new(
             arc.circle.radius + width as f64,
             (arc.a2 - arc.a1) * t + arc.a1,
         ));
-        v.push([
-            (inner_point.0 + arc.circle.center.0) as f32,
-            0.0,
-            (inner_point.1 + arc.circle.center.1) as f32,
-        ]);
-        v.push([
-            (outer_point.0 + arc.circle.center.0) as f32,
-            0.0,
-            (outer_point.1 + arc.circle.center.1) as f32,
-        ]);
+        let inner_off = (inner_point + arc.circle.center).as_vec2();
+        v.push([inner_off.x, 0.0, inner_off.y]);
+        let outer_off = (outer_point + arc.circle.center).as_vec2();
+        v.push([outer_off.x, 0.0, outer_off.y]);
     }
     // maybe someone smarter can compress this into one loop, but that person is not me
     for i in 0..divisions {
         // we are parametrically walking around the arc, sampling points
         let t = (i as f64) / (divisions as f64 - 1.0);
         // inner points are the points closest to the center
-        let inner_point = polar_to_cart((
+        let inner_point = polar_to_cart(DVec2::new(
             arc.circle.radius - width as f64,
             (arc.a2 - arc.a1) * t + arc.a1,
         ));
         // outer points are the points furthest from the center
-        let outer_point = polar_to_cart((
+        let outer_point = polar_to_cart(DVec2::new(
             arc.circle.radius + width as f64,
             (arc.a2 - arc.a1) * t + arc.a1,
         ));
-        v.push([
-            (inner_point.0 + arc.circle.center.0) as f32,
-            height,
-            (inner_point.1 + arc.circle.center.1) as f32,
-        ]);
-        v.push([
-            (outer_point.0 + arc.circle.center.0) as f32,
-            height,
-            (outer_point.1 + arc.circle.center.1) as f32,
-        ]);
+        let inner_off = (inner_point + arc.circle.center).as_vec2();
+        v.push([inner_off.x, 0.0, inner_off.y]);
+        let outer_off = (outer_point + arc.circle.center).as_vec2();
+        v.push([outer_off.x, 0.0, outer_off.y]);
     }
 
     // the vertices with their normals and UV
@@ -373,12 +361,12 @@ pub fn get_arc_mesh(arc: &Arc, width: f32, height: f32, divisions: u32) -> Mesh 
     let normals: Vec<_> = vertices.iter().map(|(_, n, _)| *n).collect();
     let uvs: Vec<_> = vertices.iter().map(|(_, _, uv)| *uv).collect();
 
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, default());
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     // mesh.compute_flat_normals();
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-    mesh.set_indices(Some(Indices::U32(indices)));
+    mesh.insert_indices(Indices::U32(indices));
     return mesh;
 }
 
@@ -471,8 +459,8 @@ impl GetWall<SquareNode> for SquareMaze {
                 if !self.maze.contains_edge(cur, adjacent) {
                     meshes.push(get_segment_mesh(
                         &Segment {
-                            p1: (adjacent.0 as f64, adjacent.1 as f64),
-                            p2: (corner.0 as f64, corner.1 as f64),
+                            p1: DVec2::new(adjacent.0 as f64, adjacent.1 as f64),
+                            p2: DVec2::new(corner.0 as f64, corner.1 as f64),
                         },
                         width,
                         height,
@@ -482,8 +470,8 @@ impl GetWall<SquareNode> for SquareMaze {
                 if !self.maze.contains_edge(cur, adjacent) {
                     meshes.push(get_segment_mesh(
                         &Segment {
-                            p1: (adjacent.0 as f64, adjacent.1 as f64),
-                            p2: (corner.0 as f64, corner.1 as f64),
+                            p1: DVec2::new(adjacent.0 as f64, adjacent.1 as f64),
+                            p2: DVec2::new(corner.0 as f64, corner.1 as f64),
                         },
                         width,
                         height,
@@ -494,7 +482,7 @@ impl GetWall<SquareNode> for SquareMaze {
         return meshes;
     }
 
-    fn is_in_wall(&self, p: (f64, f64)) -> bool {
+    fn is_in_wall(&self, p: DVec2) -> bool {
         todo!()
     }
 }

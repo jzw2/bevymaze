@@ -8,6 +8,7 @@ use bevy::window::{CursorGrabMode, PrimaryWindow};
 use bevy_mod_wanderlust::ControllerInput;
 use bevy_rapier3d::prelude::*;
 use std::f32::consts::FRAC_2_PI;
+use bevy::input::keyboard::KeyboardInput;
 
 #[derive(Component, Default, Reflect)]
 #[reflect(Component)]
@@ -20,23 +21,23 @@ pub struct PlayerBody;
 pub fn movement_input(
     mut body: Query<&mut ControllerInput, With<PlayerBody>>,
     camera: Query<&GlobalTransform, (With<PlayerCam>, Without<PlayerBody>)>,
-    input: Res<Input<KeyCode>>,
+    input: Res<ButtonInput<KeyCode>>,
 ) {
     let tf = camera.single();
 
     let mut player_input = body.single_mut();
 
     let mut dir = Vec3::ZERO;
-    if input.pressed(KeyCode::A) {
+    if input.pressed(KeyCode::KeyA) {
         dir += -tf.right();
     }
-    if input.pressed(KeyCode::D) {
+    if input.pressed(KeyCode::KeyD) {
         dir += tf.right();
     }
-    if input.pressed(KeyCode::S) {
+    if input.pressed(KeyCode::KeyS) {
         dir += -tf.forward();
     }
-    if input.pressed(KeyCode::W) {
+    if input.pressed(KeyCode::KeyW) {
         dir += tf.forward();
     }
     dir.y = 0.0;
@@ -51,40 +52,40 @@ pub fn mouse_look(
         &mut Transform,
         (With<MainTerrain>, Without<PlayerBody>, Without<PlayerCam>),
     >,
-    mut body: Query<&mut Transform, (With<PlayerBody>, Without<PlayerCam>)>,
+    // mut body: Query<&mut Transform, (With<PlayerBody>, Without<PlayerCam>)>,
     // sensitivity: Res<Sensitivity>,
-    mut input: EventReader<MouseMotion>,
+    // mut input: EventReader<MouseMotion>,
 ) {
     // let mut terrain_tf = terrain.iter_mut().next().unwrap();
     let mut cam_tf = cam.single_mut();
-    let mut body_tf = body.single_mut();
+    // let mut body_tf = body.single_mut();
 
-    // let sens = sensitivity.0;
-    let sens = 1.0; // TODO: come back to this
-
-    let mut cumulative: Vec2 = -(input.iter().map(|motion| &motion.delta).sum::<Vec2>());
-
-    // Vertical
-    let rot = cam_tf.rotation;
-
-    // Ensure the vertical rotation is clamped
-    if rot.x > FRAC_2_PI && cumulative.y.is_sign_positive()
-        || rot.x < -FRAC_2_PI && cumulative.y.is_sign_negative()
-    {
-        cumulative.y = 0.0;
-    }
-
-    cam_tf.rotate(Quat::from_scaled_axis(
-        rot * Vec3::X * cumulative.y / 180.0 * sens,
-    ));
-
-    // Horizontal
-    let rot = body_tf.rotation;
-    body_tf.rotate(Quat::from_scaled_axis(
-        rot * Vec3::Y * cumulative.x / 180.0 * sens,
-    ));
+    // // let sens = sensitivity.0;
+    // let sens = 1.0; // TODO: come back to this
+    // 
+    // let mut cumulative: Vec2 = -(input.read().map(|motion| &motion.delta).sum::<Vec2>());
+    // 
+    // // Vertical
+    // let rot = cam_tf.rotation;
+    // 
+    // // Ensure the vertical rotation is clamped
+    // if rot.x > FRAC_2_PI && cumulative.y.is_sign_positive()
+    //     || rot.x < -FRAC_2_PI && cumulative.y.is_sign_negative()
+    // {
+    //     cumulative.y = 0.0;
+    // }
+    // 
+    // cam_tf.rotate(Quat::from_scaled_axis(
+    //     rot * Vec3::X * cumulative.y / 180.0 * sens,
+    // ));
+    // 
+    // // Horizontal
+    // let rot = body_tf.rotation;
+    // body_tf.rotate(Quat::from_scaled_axis(
+    //     rot * Vec3::Y * cumulative.x / 180.0 * sens,
+    // ));
     let mut new_trans =
-        (body_tf.translation.clone() / LATTICE_GRID_SIZE as f32)/*.round()*/ * LATTICE_GRID_SIZE as f32;
+        (cam_tf.translation.clone() / LATTICE_GRID_SIZE as f32).round() * LATTICE_GRID_SIZE as f32;
     new_trans.y = 0.;
     for mut terrain_tf in terrain.iter_mut() {
         terrain_tf.translation = new_trans;
@@ -92,7 +93,7 @@ pub fn mouse_look(
 }
 
 pub fn toggle_cursor_lock(
-    input: Res<Input<KeyCode>>,
+    input: Res<ButtonInput<KeyCode>>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
 ) {
     if input.just_pressed(KeyCode::Escape) {
@@ -140,8 +141,8 @@ pub fn pan_orbit_camera(
     windows: Query<&Window, With<PrimaryWindow>>,
     mut ev_motion: EventReader<MouseMotion>,
     mut ev_scroll: EventReader<MouseWheel>,
-    input_mouse: Res<Input<MouseButton>>,
-    input_keyboard: Res<Input<KeyCode>>,
+    input_mouse: Res<ButtonInput<MouseButton>>,
+    input_keyboard: Res<ButtonInput<KeyCode>>,
     mut query: Query<(&mut PanOrbitCamera, &mut Transform, &Projection)>,
 ) {
     StandardMaterial { ..default() };
@@ -155,17 +156,17 @@ pub fn pan_orbit_camera(
     let mut orbit_button_changed = false;
 
     if input_mouse.pressed(orbit_button) {
-        for ev in ev_motion.iter() {
+        for ev in ev_motion.read() {
             rotation_move += ev.delta;
         }
     }
     if input_mouse.pressed(pan_button) || input_keyboard.just_pressed(KeyCode::Space) {
         // Pan only if we're not rotating at the moment
-        for ev in ev_motion.iter() {
+        for ev in ev_motion.read() {
             pan += ev.delta;
         }
     }
-    for ev in ev_scroll.iter() {
+    for ev in ev_scroll.read() {
         scroll += ev.y;
     }
     if input_mouse.just_released(orbit_button) || input_mouse.just_pressed(orbit_button) {

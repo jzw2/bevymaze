@@ -10,8 +10,8 @@ pub struct TerrainDataPointRequest {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
-pub struct MazeCell {
-    pub cell: [i32; 2],
+pub struct CompressedMazeComponent {
+    pub position: [i32; 2],
     pub data: BitVec<u32>,
 }
 
@@ -37,6 +37,12 @@ impl Default for TerrainDataPoint {
     }
 }
 
+impl TerrainDataPoint {
+    pub fn is_finite(&self) -> bool {
+        self.coordinates[0].is_finite() && self.coordinates[1].is_finite()
+    }
+}
+
 // #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 // pub struct ReqTerrainHeights(pub Vec<TerrainDataPointRequest>);
 
@@ -53,7 +59,7 @@ pub enum MazeNetworkRequest {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum MazeNetworkResponse {
     TerrainHeights(Vec<TerrainDataPoint>),
-    Maze(Vec<MazeCell>),
+    Maze(Vec<CompressedMazeComponent>),
 }
 
 // Use a port of 0 to automatically select a port

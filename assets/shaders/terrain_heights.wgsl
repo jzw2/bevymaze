@@ -39,6 +39,7 @@ var<storage, read> transform: vec2<f32>;
 
 /// Next halfedge in a triangle.
 fn next_halfedge(i: u32) -> u32 {
+//    return 3u * (i / 3u) + (i + 1u) % 3u;
     if i % 3u == 2u {
         return i - 2u;
     } else {
@@ -48,6 +49,7 @@ fn next_halfedge(i: u32) -> u32 {
 
 /// Previous halfedge in a triangle.
 fn prev_halfedge(i: u32) -> u32 {
+//    return 3u * (i / 3u) + (i - 1u) % 3u;
     if i % 3u == 0u {
         return i + 2u;
     } else {
@@ -80,7 +82,7 @@ fn find_triangle(p: vec2<f32>, edge: u32) -> u32 {
 
     // we don't want to go more than 20 times
     // TODO: figure out why having a max of 100 is too much???
-    for (var i: i32 = 0; i < 20; i++) {
+    for (var i: i32 = 0; i < 100; i++) {
         let next: u32 = next_halfedge(current);
         let pc: u32 = 2u * triangles[current];
         let pn: u32 = 2u * triangles[next];

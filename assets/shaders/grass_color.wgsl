@@ -28,38 +28,38 @@
     //pbr_functions as fns,
 }
 
-@group(1) @binding(0)
+@group(2) @binding(0)
 var<uniform> max_height: f32;
-@group(1) @binding(1)
+@group(2) @binding(1)
 var<uniform> grass_line: f32;
-@group(1) @binding(2)
+@group(2) @binding(2)
 var<uniform> tree_line: f32;
-@group(1) @binding(3)
+@group(2) @binding(3)
 var<uniform> snow_line: f32;
-@group(1) @binding(4)
+@group(2) @binding(4)
 var<uniform> grass_color: vec4<f32>;
-@group(1) @binding(5)
+@group(2) @binding(5)
 var<uniform> tree_color: vec4<f32>;
-@group(1) @binding(6)
+@group(2) @binding(6)
 var<uniform> snow_color: vec4<f32>;
-@group(1) @binding(7)
+@group(2) @binding(7)
 var<uniform> stone_color: vec4<f32>;
-@group(1) @binding(8)
+@group(2) @binding(8)
 var<uniform> cosine_max_snow_slope: f32;
-@group(1) @binding(9)
+@group(2) @binding(9)
 var<uniform> cosine_max_tree_slope: f32;
-@group(1) @binding(10)
+@group(2) @binding(10)
 var<uniform> u_bound: f32;
-@group(1) @binding(11)
+@group(2) @binding(11)
 var<uniform> v_bound: f32;
-@group(1) @binding(12)
+@group(2) @binding(12)
 var normal_texture: texture_2d<f32>;
-@group(1) @binding(13)
+@group(2) @binding(13)
 var normal_sampler: sampler;
-@group(1) @binding(14)
+@group(2) @binding(14)
 var<uniform> scale: f32;
 
-@group(1) @binding(23)
+@group(2) @binding(23)
 var<uniform> layer_height: f32;
 
 @fragment
@@ -97,18 +97,24 @@ fn fragment(
         discard;
     }
 
-    let leaf = floor(in.world_position.xz * 200.0f);
+    let leaf = floor(in.world_position.xz * 100.0f);
+    let tuft = floor(in.world_position.xz * 5.0f);
 
     let rand = hash12(leaf);
-    let norm_l_height = layer_height / 0.1f;
-    if rand > norm_l_height {
+    let norm_l_height = layer_height / 0.2f;
+
+    if hash12(tuft) < 0.95 {
+        discard;
+    }
+
+    if rand + 0.1 > norm_l_height {
         pbr.material.base_color = grass_color * norm_l_height * 1.1;
     } else {
         discard;
     }
 
     pbr.material.perceptual_roughness = 0.90;
-    pbr.material.reflectance = 0.2;
+    pbr.material.reflectance = 0.02;
     var output_color = pbr_functions::apply_pbr_lighting(pbr);
     output_color = pbr_functions::apply_fog(fog, output_color, in.world_position.xyz, view.world_position.xyz);
 

@@ -28,35 +28,35 @@
     //pbr_functions as fns,
 }
 
-@group(1) @binding(0)
+@group(2) @binding(0)
 var<uniform> max_height: f32;
-@group(1) @binding(1)
+@group(2) @binding(1)
 var<uniform> grass_line: f32;
-@group(1) @binding(2)
+@group(2) @binding(2)
 var<uniform> tree_line: f32;
-@group(1) @binding(3)
+@group(2) @binding(3)
 var<uniform> snow_line: f32;
-@group(1) @binding(4)
+@group(2) @binding(4)
 var<uniform> grass_color: vec4<f32>;
-@group(1) @binding(5)
+@group(2) @binding(5)
 var<uniform> tree_color: vec4<f32>;
-@group(1) @binding(6)
+@group(2) @binding(6)
 var<uniform> snow_color: vec4<f32>;
-@group(1) @binding(7)
+@group(2) @binding(7)
 var<uniform> stone_color: vec4<f32>;
-@group(1) @binding(8)
+@group(2) @binding(8)
 var<uniform> cosine_max_snow_slope: f32;
-@group(1) @binding(9)
+@group(2) @binding(9)
 var<uniform> cosine_max_tree_slope: f32;
-@group(1) @binding(10)
+@group(2) @binding(10)
 var<uniform> u_bound: f32;
-@group(1) @binding(11)
+@group(2) @binding(11)
 var<uniform> v_bound: f32;
-@group(1) @binding(12)
+@group(2) @binding(12)
 var normal_texture: texture_2d<f32>;
-@group(1) @binding(13)
+@group(2) @binding(13)
 var normal_sampler: sampler;
-@group(1) @binding(14)
+@group(2) @binding(14)
 var<uniform> scale: f32;
 
 @fragment
@@ -95,21 +95,37 @@ fn fragment(
     let height_frac = in.original_world_position[1] / max_height;
 
     pbr.material.perceptual_roughness = 0.98;
-    pbr.material.reflectance = 0.2;
+    pbr.material.reflectance = 0.02;
+
+    var grass_blade_color = grass_color;
+
+    let leaf = floor(in.world_position.xz * 100.0f);
+    if hash12(leaf) > 0.999 {
+        grass_blade_color = stone_color * 0.7;
+    } else {
+        if hash12(leaf) > 0.1 {
+            grass_blade_color = grass_color * 0.1 * 1.1;
+        } else {
+            grass_blade_color = grass_color * 0.5 * 0.7;
+        }
+    }
+
+    let snow_sin = sin(2.0 * cos(in.world_position.xz * 0.01));
+    let snow_off = 0.1 * snow_sin.x * snow_sin.y;
 
     if (height_frac < grass_line) {
-        base_color = grass_color * 0.5;
-    } else if (height_frac < tree_line) {
+        base_color = grass_blade_color;
+    } else if (height_frac < tree_line + snow_off * 0.95) {
         if (cosine_angle > cosine_max_tree_slope) {
             base_color = tree_color * 0.5;
         } else {
-            base_color = grass_color * 0.5;
+            base_color = grass_blade_color;
         }
-    } else if (height_frac > snow_line && cosine_angle > cosine_max_snow_slope) {
+    } else if (height_frac + snow_off > snow_line && cosine_angle > cosine_max_snow_slope) {
         let flicker = floor(in.world_position.xz * 20.0f);
         let rand = hash12(flicker);
-        pbr.material.reflectance = 0.95;
-//        pbr.material.perceptual_roughness = 0.01;
+        pbr.material.reflectance = 0.96;
+        pbr.material.perceptual_roughness = 0.5;
         base_color = snow_color;
         if rand > 0.5 {
             base_color -= 0.6 * vec4<f32>(1.0, 1.0, 1.0, 0.0);
