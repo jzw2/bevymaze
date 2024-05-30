@@ -45,7 +45,7 @@ use crate::maze_loader::{
     MAZE_COMPONENTS_Y, MAZE_DATA_COUNT,
 };
 use crate::maze_render::{GetWall, MAZE_HEIGHT};
-use crate::nearest_neighbor::TerrainDataMap;
+use crate::terrain_data_map::TerrainDataMap;
 use crate::terrain_loader::{
     setup_terrain_loader, setup_transform_res, stream_terrain_mesh, update_transform_res,
     MainTerrainColldier, TerrainTransformMaterialRes, TerrainUpdateProcHandle,
@@ -90,7 +90,7 @@ mod shaders;
 // mod terrain_loader;
 mod loader;
 mod maze_loader;
-mod nearest_neighbor;
+mod terrain_data_map;
 mod rendering;
 mod terrain_loader;
 mod terrain_render;

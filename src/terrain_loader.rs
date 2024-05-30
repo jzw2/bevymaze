@@ -44,7 +44,7 @@ use tokio_tungstenite::tungstenite::Error;
 use tokio_tungstenite::tungstenite::Message::Binary;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use url::Url;
-use crate::nearest_neighbor::TerrainDataMap;
+use crate::terrain_data_map::TerrainDataMap;
 
 /// Quarter meter data tolerance when the player is 1m away
 const DATA_TOLERANCE: f64 = 0.5;

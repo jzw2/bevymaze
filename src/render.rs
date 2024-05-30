@@ -55,3 +55,5 @@ pub fn quad_cc_indices_off(off: u32) -> Indices {
     let i = off;
     return vec![i + 2, i + 1, i, i + 1, i + 2, i + 3];
 }
+
+

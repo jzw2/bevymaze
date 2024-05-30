@@ -1,5 +1,6 @@
 use crate::shaders::MAX_VERTICES;
-use crate::terrain_render::TERRAIN_VERTICES;
+use crate::terrain_render::{create_base_lattice_with_verts, TERRAIN_VERTICES};
+use crate::test_render::draw_debug;
 use bevy::math::{DVec2, Vec2};
 use bevy::prelude::Resource;
 use bevy::reflect::List;
@@ -9,6 +10,7 @@ use itertools::Itertools;
 use kdtree::distance::squared_euclidean;
 use kdtree::KdTree;
 use ordered_float::OrderedFloat;
+use rand::{thread_rng, Rng};
 use server::connection::TerrainDataPoint;
 use std::collections::HashMap;
 
@@ -97,7 +99,7 @@ impl TerrainDataLocator {
             // update the fulcrum. It's going to be the opposite half edge of the current spoke
             fulcrum = self.triangulation.halfedges[next_spoke];
 
-            if prev_halfedge(fulcrum) != starting_spoke && fulcrum != usize::MAX {
+            if fulcrum != usize::MAX && prev_halfedge(fulcrum) != starting_spoke {
                 return None;
             }
         }
@@ -338,8 +340,14 @@ impl TerrainDataMap {
         vertex[1] += self.mesh.center.y;
         let vtx = vertex.map(|e| e as f64);
         // we check if the nearest guy is in the acceptable range
-        let nearest = self.resolved_data.locator.nearest(&vtx, self.resolved_data.locator.last_idx);
-        let unresolved_nearest = self.unresolved_data.locator.nearest(&vtx, self.unresolved_data.locator.last_idx);
+        let nearest = self
+            .resolved_data
+            .locator
+            .nearest(&vtx, self.resolved_data.locator.last_idx);
+        let unresolved_nearest = self
+            .unresolved_data
+            .locator
+            .nearest(&vtx, self.unresolved_data.locator.last_idx);
         let mut min = f32::INFINITY;
         min = min
             .min(nearest.distance as f32)
@@ -349,7 +357,58 @@ impl TerrainDataMap {
         }
         self.resolved_data.locator.last_idx = nearest.idx;
         self.unresolved_data.locator.last_idx = unresolved_nearest.idx;
-        
+
         return None;
+    }
+}
+
+#[test]
+fn mesh_verts_test() {
+    let lattice = create_base_lattice_with_verts(500., 100.);
+    let mut map = TerrainDataMap::new_with_capacity(&lattice, 1000);
+    let mut terrain_data_points: Vec<TerrainDataPoint> = (&lattice)
+        .into_iter()
+        .enumerate()
+        .map(|(i, v)| TerrainDataPoint {
+            coordinates: v.as_vec2().to_array(),
+            height: 0.,
+            gradient: [0., 0.],
+            idx: i,
+        })
+        .collect();
+    map.mark_requested(&mut terrain_data_points);
+    let mut prev = 0;
+
+    let mut triangles = Vec::<[usize; 3]>::new();
+    let triangulation = &map.mesh.reverse_locator.triangulation;
+    for i in 0..triangulation.len() {
+        triangles.push([
+            triangulation.triangles[3 * i],
+            triangulation.triangles[3 * i + 1],
+            triangulation.triangles[3 * i + 2],
+        ]);
+    }
+    
+    let mut data = map.mesh.reverse_locator.data.clone();
+    let mut corners = map.mesh.reverse_locator.corners.clone();
+    data.append(&mut corners.to_vec());
+    draw_debug(
+        "find_vert_triangulation.png",
+        None,
+        &triangulation,
+        &data,
+        &triangles,
+    );
+
+    for (i, point) in (&lattice).into_iter().enumerate() {
+        // get the point, but add a slight perturbance
+        let to_find = point.clone()
+            + DVec2::new(
+                thread_rng().gen_range(0.0..0.1),
+                thread_rng().gen_range(0.0..0.1),
+            );
+        let nearest = map.mesh.reverse_locator.nearest(&to_find.to_array(), prev);
+        prev = nearest.idx;
+        assert_eq!(nearest.data_idx, i);
     }
 }
