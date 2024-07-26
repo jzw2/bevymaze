@@ -1,5 +1,4 @@
 use crate::terrain_render::{MainTerrain, LATTICE_GRID_SIZE};
-use bevy::core::Zeroable;
 use bevy::core_pipeline::fxaa::Sensitivity;
 use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::math::DVec3;
@@ -29,16 +28,16 @@ pub fn movement_input(
 
     let mut dir = Vec3::ZERO;
     if input.pressed(KeyCode::KeyA) {
-        dir += -tf.right();
+        dir += -tf.right().as_vec3();
     }
     if input.pressed(KeyCode::KeyD) {
-        dir += tf.right();
+        dir += tf.right().as_vec3();
     }
     if input.pressed(KeyCode::KeyS) {
-        dir += -tf.forward();
+        dir += -tf.forward().as_vec3();
     }
     if input.pressed(KeyCode::KeyW) {
-        dir += tf.forward();
+        dir += tf.forward().as_vec3();
     }
     dir.y = 0.0;
     player_input.movement = dir.normalize_or_zero() * 4.;

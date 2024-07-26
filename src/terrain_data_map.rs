@@ -1,5 +1,5 @@
 use crate::shaders::MAX_VERTICES;
-use crate::terrain_render::{create_base_lattice_with_verts, TERRAIN_VERTICES};
+use crate::terrain_render::{create_base_lattice_with_verts, create_lattice, TERRAIN_VERTICES};
 use crate::test_render::draw_debug;
 use bevy::math::{DVec2, Vec2};
 use bevy::prelude::Resource;
@@ -7,8 +7,6 @@ use bevy::reflect::List;
 use bevy::utils::HashSet;
 use delaunator::{next_halfedge, prev_halfedge, triangulate, Point, Triangulation};
 use itertools::Itertools;
-use kdtree::distance::squared_euclidean;
-use kdtree::KdTree;
 use ordered_float::OrderedFloat;
 use rand::{thread_rng, Rng};
 use server::connection::TerrainDataPoint;
@@ -78,17 +76,20 @@ impl TerrainDataLocator {
         target: &[f64; 2],
         best_dist_sqr: f64,
         mut fulcrum: usize,
+        visited_pairs: &mut Vec<[usize; 2]>
     ) -> Option<(f64, usize)> {
         let mut next_spoke = fulcrum;
-
+        
         if fulcrum == usize::MAX {
             return None;
         }
 
         let starting_spoke = prev_halfedge(fulcrum);
-
+        
         loop {
             next_spoke = prev_halfedge(fulcrum);
+
+            visited_pairs.push([fulcrum, next_spoke]);
             let cur_dist_sqr =
                 distance_squared(&self.data[self.triangulation.triangles[next_spoke]], target);
 
@@ -105,7 +106,7 @@ impl TerrainDataLocator {
         }
     }
 
-    pub fn nearest(&self, target: &[f64; 2], edge: usize) -> NearestNeighbor {
+    pub fn nearest(&self, target: &[f64; 2], edge: usize, visited_pairs: &mut Vec<[usize; 2]>) -> NearestNeighbor {
         // we start at a random vertex
         let mut cur_fulcrum = edge;
         let starting_dist_sqr = distance_squared(
@@ -116,7 +117,7 @@ impl TerrainDataLocator {
 
         loop {
             if let Some((cur_dist_sqr, closer_spoke)) =
-                self.nearest_around_vertex(target, distance_squared, cur_fulcrum)
+                self.nearest_around_vertex(target, distance_squared, cur_fulcrum, visited_pairs)
             {
                 distance_squared = cur_dist_sqr;
                 cur_fulcrum = closer_spoke;
@@ -203,6 +204,7 @@ impl TerrainDataHolder {
                         (data.coordinates[1] - mesh.center.y) as f64,
                     ],
                     last_idx,
+                    &mut vec![]
                 );
                 let required_dist = mesh.get_check_radius(nearest.data_idx);
                 self.eviction_priority[i] = (i, nearest.distance as f32 / required_dist);
@@ -343,11 +345,11 @@ impl TerrainDataMap {
         let nearest = self
             .resolved_data
             .locator
-            .nearest(&vtx, self.resolved_data.locator.last_idx);
+            .nearest(&vtx, self.resolved_data.locator.last_idx, &mut vec![]);
         let unresolved_nearest = self
             .unresolved_data
             .locator
-            .nearest(&vtx, self.unresolved_data.locator.last_idx);
+            .nearest(&vtx, self.unresolved_data.locator.last_idx, &mut vec![]);
         let mut min = f32::INFINITY;
         min = min
             .min(nearest.distance as f32)
@@ -364,7 +366,7 @@ impl TerrainDataMap {
 
 #[test]
 fn mesh_verts_test() {
-    let lattice = create_base_lattice_with_verts(500., 100.);
+    let lattice = create_lattice(30., 100., 100., 10., 0.75);
     let mut map = TerrainDataMap::new_with_capacity(&lattice, 1000);
     let mut terrain_data_points: Vec<TerrainDataPoint> = (&lattice)
         .into_iter()
@@ -388,26 +390,38 @@ fn mesh_verts_test() {
             triangulation.triangles[3 * i + 2],
         ]);
     }
-    
+
     let mut data = map.mesh.reverse_locator.data.clone();
     let mut corners = map.mesh.reverse_locator.corners.clone();
     data.append(&mut corners.to_vec());
+    
     draw_debug(
-        "find_vert_triangulation.png",
+        "find_vert_triangulation.svg",
         None,
         &triangulation,
         &data,
         &triangles,
+        (-100., -100., 200., 200.)
     );
 
     for (i, point) in (&lattice).into_iter().enumerate() {
         // get the point, but add a slight perturbance
         let to_find = point.clone()
             + DVec2::new(
-                thread_rng().gen_range(0.0..0.1),
-                thread_rng().gen_range(0.0..0.1),
+                thread_rng().gen_range(0.0..0.01),
+                thread_rng().gen_range(0.0..0.01),
             );
-        let nearest = map.mesh.reverse_locator.nearest(&to_find.to_array(), prev);
+        let mut visited = vec![];
+        let nearest = map.mesh.reverse_locator.nearest(&to_find.to_array(), 0, &mut visited);
+        println!("{:?} {:?}", visited, to_find);
+        draw_debug(
+            format!("find_vert_triangulation_{}.svg", i).as_str(),
+            Some((&visited, &point.to_array())),
+            &triangulation,
+            &data,
+            &triangles,
+            (-100., -100., 200., 200.)
+        );
         prev = nearest.idx;
         assert_eq!(nearest.data_idx, i);
     }

@@ -1,38 +1,41 @@
-use crate::maze_loader::{MAZE_COMPONENTS_X, RawMazeData};
+use crate::maze_loader::{RawMazeData, MAZE_COMPONENTS_X};
 use crate::terrain_render::TERRAIN_VERTICES;
 use bevy::asset::{load_internal_asset, Asset};
 use bevy::core_pipeline::core_3d;
 use bevy::core_pipeline::core_3d::graph::Node3d;
-use bevy::pbr::{ExtendedMaterial, ExtractedMaterials, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline, MaterialPipeline, MaterialPipelineKey, PrepassPipeline, RenderMaterials};
+use bevy::core_pipeline::core_3d::graph::Node3d::StartMainPass;
+use bevy::pbr::{
+    ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline,
+    MaterialPipeline, MaterialPipelineKey, PreparedMaterial, PrepassPipeline,
+};
 use bevy::prelude::*;
 use bevy::render::extract_component::{ExtractComponent, ExtractComponentPlugin};
 use bevy::render::extract_instances::ExtractedInstances;
 use bevy::render::extract_resource::ExtractResourcePlugin;
-use bevy::render::mesh::MeshVertexBufferLayout;
+use bevy::render::mesh::{MeshVertexBufferLayout, MeshVertexBufferLayoutRef};
 use bevy::render::render_asset::RenderAssets;
 use bevy::render::render_graph::{RenderGraph, RenderGraphApp, RenderLabel, ViewNodeRunner};
+use bevy::render::render_resource::Face::Back;
+use bevy::render::render_resource::ShaderDefVal::UInt;
 use bevy::render::render_resource::{
     encase, AsBindGroup, AsBindGroupError, BindGroup, BindGroupDescriptor, BindGroupEntry,
     BindGroupLayout, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingResource, BindingType,
-    Buffer, BufferBindingType, BufferInitDescriptor, BufferUsages, BufferVec,
-    CachedComputePipelineId, CachedPipelineState, ComputePassDescriptor, ComputePipelineDescriptor,
-    OwnedBindingResource, PipelineCache, PipelineCacheError, PreparedBindGroup,
-    RenderPipelineDescriptor, ShaderRef, ShaderStages, ShaderType, SpecializedMeshPipelineError,
-    StorageBuffer, StorageTextureAccess, TextureFormat, TextureViewDimension, UnpreparedBindGroup,
+    Buffer, BufferBindingType, BufferInitDescriptor, BufferUsages, CachedComputePipelineId,
+    CachedPipelineState, ComputePassDescriptor, ComputePipelineDescriptor, OwnedBindingResource,
+    PipelineCache, PipelineCacheError, PreparedBindGroup, RawBufferVec, RenderPipelineDescriptor,
+    ShaderRef, ShaderStages, ShaderType, SpecializedMeshPipelineError, StorageBuffer,
+    StorageTextureAccess, TextureFormat, TextureViewDimension, UnpreparedBindGroup,
 };
 use bevy::render::renderer::{RenderContext, RenderDevice, RenderQueue};
 use bevy::render::texture::{FallbackImage, GpuImage};
 use bevy::render::{render_graph, MainWorld, Render, RenderApp, RenderSet};
 use bevy_mod_debugdump::render_graph::Settings;
+use server::square_maze_gen::{SQUARE_MAZE_CELL_COUNT, SQUARE_MAZE_CELL_SIZE};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::rc::Rc;
 use std::sync::Arc;
-use bevy::core_pipeline::core_3d::graph::Node3d::StartMainPass;
-use bevy::render::render_resource::Face::Back;
-use bevy::render::render_resource::ShaderDefVal::UInt;
-use server::square_maze_gen::{SQUARE_MAZE_CELL_COUNT, SQUARE_MAZE_CELL_SIZE};
 // use bevy::render::RenderApp;
 // use bevy::render::renderer::{RenderAdapter, RenderDevice};
 
@@ -48,21 +51,21 @@ pub const MAX_TRIANGLES: usize = 2 * MAX_VERTICES - 5;
 #[derive(Resource)]
 pub struct TerrainMaterialDataHolder {
     /// len is MAX_TRIANGLES * 3
-    pub(crate) triangles: BufferVec<u32>,
+    pub(crate) triangles: RawBufferVec<u32>,
     /// len is MAX_TRIANGLES * 3
-    pub(crate) halfedges: BufferVec<u32>,
+    pub(crate) halfedges: RawBufferVec<u32>,
     /// len is 2 * MAX_VERTICES
-    pub(crate) vertices: BufferVec<f32>,
+    pub(crate) vertices: RawBufferVec<f32>,
     /// len is MAX_VERTICES
-    pub(crate) height: BufferVec<f32>,
+    pub(crate) height: RawBufferVec<f32>,
     /// len is 2 * MAX_VERTICES
-    pub(crate) gradients: BufferVec<f32>,
+    pub(crate) gradients: RawBufferVec<f32>,
     /// len is TERRAIN_VERTICES
-    pub(crate) triangle_indices: BufferVec<u32>,
+    pub(crate) triangle_indices: RawBufferVec<u32>,
 
     // the vertices of the mesh on the x-z plane
     // len is TERRAIN_VERTICES * 2
-    pub(crate) mesh_vertices: BufferVec<f32>,
+    pub(crate) mesh_vertices: RawBufferVec<f32>,
 }
 
 #[derive(Resource)]
@@ -92,13 +95,13 @@ pub struct TerrainMaterial {
     #[uniform(3)]
     pub snow_line: f32,
     #[uniform(4)]
-    pub grass_color: Color,
+    pub grass_color: LinearRgba,
     #[uniform(5)]
-    pub tree_color: Color,
+    pub tree_color: LinearRgba,
     #[uniform(6)]
-    pub snow_color: Color,
+    pub snow_color: LinearRgba,
     #[uniform(7)]
-    pub stone_color: Color,
+    pub stone_color: LinearRgba,
     #[uniform(8)]
     pub cosine_max_snow_slope: f32,
     #[uniform(9)]
@@ -175,7 +178,7 @@ impl MaterialExtension for GrassLayerMaterial {
     fn specialize(
         _pipeline: &MaterialExtensionPipeline,
         descriptor: &mut RenderPipelineDescriptor,
-        _layout: &MeshVertexBufferLayout,
+        _layout: &MeshVertexBufferLayoutRef,
         _key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
         descriptor.primitive.cull_mode = Some(Back);
@@ -212,14 +215,23 @@ impl MaterialExtension for MazeLayerMaterial {
     fn specialize(
         _pipeline: &MaterialExtensionPipeline,
         descriptor: &mut RenderPipelineDescriptor,
-        _layout: &MeshVertexBufferLayout,
+        _layout: &MeshVertexBufferLayoutRef,
         _key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
         descriptor.primitive.cull_mode = None;
         if let Some(mut frag_state) = descriptor.fragment.clone() {
-            frag_state.shader_defs.push(UInt("COMPONENT_CELLS_DEF__".to_string(), SQUARE_MAZE_CELL_COUNT as u32));
-            frag_state.shader_defs.push(UInt("PATH_WIDTH_DEF__".to_string(), SQUARE_MAZE_CELL_SIZE as u32));
-            frag_state.shader_defs.push(UInt("MAZE_COMPONENTS_DEF__".to_string(), MAZE_COMPONENTS_X as u32));
+            frag_state.shader_defs.push(UInt(
+                "COMPONENT_CELLS_DEF__".to_string(),
+                SQUARE_MAZE_CELL_COUNT as u32,
+            ));
+            frag_state.shader_defs.push(UInt(
+                "PATH_WIDTH_DEF__".to_string(),
+                SQUARE_MAZE_CELL_SIZE as u32,
+            ));
+            frag_state.shader_defs.push(UInt(
+                "MAZE_COMPONENTS_DEF__".to_string(),
+                MAZE_COMPONENTS_X as u32,
+            ));
             descriptor.fragment = Some(frag_state);
         }
         return Ok(());
@@ -248,12 +260,10 @@ impl Plugin for TerrainPlugin {
 
         let render_app = app.sub_app_mut(RenderApp);
 
-        let mut render_graph = render_app.world.resource_mut::<RenderGraph>();
-
         render_app
             .add_render_graph_node::<UpdateTerrainVertexHeightsNode>(
                 core_3d::graph::Core3d,
-                UpdateTerrainVertexHeightsLabel
+                UpdateTerrainVertexHeightsLabel,
             )
             .add_render_graph_edges(
                 core_3d::graph::Core3d,
@@ -405,8 +415,9 @@ impl render_graph::Node for UpdateTerrainVertexHeightsNode {
         world: &World,
     ) -> Result<(), render_graph::NodeRunError> {
         if let Some(terrain_data) = world.get_resource::<TerrainVerticesCount>() {
-            let render_terrain_material = world.resource::<RenderMaterials<TerrainMaterial>>();
-            let (id, prepared_material) = render_terrain_material.0.iter().next().unwrap();
+            let render_terrain_material =
+                world.resource::<RenderAssets<PreparedMaterial<TerrainMaterial>>>();
+            let (id, prepared_material) = render_terrain_material.iter().next().unwrap();
 
             let pipeline_cache = world.resource::<PipelineCache>();
             let pipeline = world.resource::<UpdateTerrainHeightsPipeline>();

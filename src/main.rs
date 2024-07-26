@@ -53,10 +53,7 @@ use crate::terrain_loader::{
 use crate::ui::*;
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::pbr::wireframe::{WireframeColor, WireframeConfig, WireframePlugin};
-use bevy::render::render_resource::{
-    Buffer, BufferUsages, BufferVec, Extent3d, OwnedBindingResource, PreparedBindGroup,
-    StorageBuffer, TextureDimension, TextureFormat, TextureUsages,
-};
+use bevy::render::render_resource::{Buffer, BufferUsages, BufferVec, Extent3d, OwnedBindingResource, PreparedBindGroup, RawBufferVec, StorageBuffer, TextureDimension, TextureFormat, TextureUsages};
 use bevy::render::renderer::{RenderDevice, RenderQueue};
 use bevy::render::settings::RenderCreation::Automatic;
 use bevy::render::settings::{WgpuFeatures, WgpuSettings};
@@ -75,7 +72,7 @@ use bitvec::macros::internal::funty::Floating;
 use delaunator::{triangulate, Point};
 use futures_lite::AsyncReadExt;
 use futures_util::{FutureExt, Stream, StreamExt};
-use iyes_perf_ui::PerfUiCompleteBundle;
+use iyes_perf_ui::entries::PerfUiCompleteBundle;
 use rand::Rng;
 use server::connection::*;
 use server::terrain_gen::{TerrainGenerator, FOOTHILL_START, MAX_HEIGHT, TILE_SIZE};
@@ -321,10 +318,10 @@ fn create_terrain(
         grass_line: 0.15,
         tree_line: 0.5,
         snow_line: 0.75,
-        grass_color: Color::rgba(30.0/255.0, 94.0/255.0, 54.0/255.0, 1. ),
-        tree_color: Color::rgba(0.2, 0.5, 0.25, 1.),
-        snow_color: Color::rgba(0.95, 0.95, 0.95, 1.),
-        stone_color: Color::rgba(0.34, 0.34, 0.34, 1.),
+        grass_color: LinearRgba::new(30.0/255.0, 94.0/255.0, 54.0/255.0, 1. ),
+        tree_color: LinearRgba::new(0.2, 0.5, 0.25, 1.),
+        snow_color: LinearRgba::new(0.95, 0.95, 0.95, 1.),
+        stone_color: LinearRgba::new(0.34, 0.34, 0.34, 1.),
         cosine_max_snow_slope: (38. * PI / 180.).cos(),
         cosine_max_tree_slope: (40. * PI / 180.).cos(),
         u_bound: /*X_VIEW_DIST_M as f32,*/ ((X_VIEW_DIST_M * TEXTURE_SCALE).asinh() / TEXTURE_SCALE) as f32,
@@ -493,19 +490,19 @@ Color: {:?}
     // Toggle the global wireframe color
     if keyboard_input.just_pressed(KeyCode::KeyX) {
         config.default_color = if config.default_color == Color::WHITE.into() {
-            Color::PINK.into()
+            bevy::color::palettes::css::PINK.into()
         } else {
-            Color::WHITE.into()
+            bevy::color::palettes::css::WHITE.into()
         };
     }
 
     // Toggle the color of a wireframe using WireframeColor and not the global color
     if keyboard_input.just_pressed(KeyCode::KeyC) {
         for mut color in &mut wireframe_colors {
-            color.color = if color.color == Color::LIME_GREEN.into() {
-                Color::RED.into()
+            color.color = if color.color == bevy::color::palettes::css::LIMEGREEN.into() {
+                bevy::color::palettes::css::RED.into()
             } else {
-                Color::LIME_GREEN.into()
+                bevy::color::palettes::css::LIMEGREEN.into()
             };
         }
     }
@@ -522,7 +519,7 @@ pub fn exit_system(
         tracing::info!("Maze: No windows are open, exiting");
         terrain_update_proc_handle.0.abort();
         maze_update_proc_handle.0.abort();
-        app_exit_events.send(AppExit);
+        app_exit_events.send(AppExit::Success);
     }
 }
 
@@ -579,24 +576,18 @@ fn main() {
         .add_plugins(RapierDebugRenderPlugin::default())
         .add_plugins(WanderlustPlugin::default())
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
-        .insert_resource(RapierConfiguration {
-            timestep_mode: TimestepMode::Fixed {
-                dt: 0.008,
-                substeps: 4,
-            },
-            ..default()
-        })
+        .insert_resource(RapierConfiguration::new(1.0))
         .insert_resource(FramepaceSettings {
             limiter: Limiter::Manual(std::time::Duration::from_secs_f64(0.008)),
         })
         .insert_resource(TerrainMaterialDataHolder {
-            triangles: BufferVec::new(BufferUsages::STORAGE),
-            halfedges: BufferVec::new(BufferUsages::STORAGE),
-            vertices: BufferVec::new(BufferUsages::STORAGE),
-            height: BufferVec::new(BufferUsages::STORAGE),
-            gradients: BufferVec::new(BufferUsages::STORAGE),
-            triangle_indices: BufferVec::new(BufferUsages::STORAGE),
-            mesh_vertices: BufferVec::new(BufferUsages::STORAGE),
+            triangles: RawBufferVec::new(BufferUsages::STORAGE),
+            halfedges: RawBufferVec::new(BufferUsages::STORAGE),
+            vertices: RawBufferVec::new(BufferUsages::STORAGE),
+            height: RawBufferVec::new(BufferUsages::STORAGE),
+            gradients: RawBufferVec::new(BufferUsages::STORAGE),
+            triangle_indices: RawBufferVec::new(BufferUsages::STORAGE),
+            mesh_vertices: RawBufferVec::new(BufferUsages::STORAGE),
         })
         .insert_resource(MazeLayerMaterialDataHolder {
             raw_maze_data: StorageBuffer::from(Box::new(
